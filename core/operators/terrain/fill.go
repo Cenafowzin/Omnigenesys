@@ -1,4 +1,4 @@
-package operators
+package terrain
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ type Fill struct {
 func (f *Fill) Execute(ctx *pipeline.Context) error {
 	layer := ctx.Grid.GetLayer(f.Layer)
 	if layer == nil {
-		return fmt.Errorf("layer %q not found", f.Layer)
+		return fmt.Errorf("fill: layer %q not found", f.Layer)
 	}
 
 	for y := 0; y < ctx.Grid.Height; y++ {

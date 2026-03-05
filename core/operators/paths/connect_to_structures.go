@@ -1,8 +1,8 @@
-package operators
+package paths
 
 import (
 	"fmt"
-	"procedural_framework/core/pathfinding"
+	"procedural_framework/core/generators/pathfinding"
 	"procedural_framework/core/pipeline"
 )
 
@@ -38,10 +38,7 @@ func (c *ConnectToStructures) Execute(ctx *pipeline.Context) error {
 	targets := entryPointsFrom(ctx, c.StructuresLayer, c.From, clearance)
 
 	for i := 0; i < c.RandomWaypoints; i++ {
-		targets = append(targets, Point{
-			ctx.RNG.Intn(ctx.Grid.Width),
-			ctx.RNG.Intn(ctx.Grid.Height),
-		})
+		targets = append(targets, randomPoint(ctx))
 	}
 
 	scale := c.NoiseScale

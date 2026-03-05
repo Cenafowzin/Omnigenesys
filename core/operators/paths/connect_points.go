@@ -1,29 +1,14 @@
-package operators
+package paths
 
 import (
 	"fmt"
 	"procedural_framework/core/pipeline"
 )
 
-type Point struct {
-	X, Y int
-}
-
 // ConnectPoints executa um random walk a partir de From.
-//
 // Se To não for nil, DirectChance define a probabilidade de cada passo
 // se mover em direção ao destino (0.0 = totalmente aleatório, 1.0 = linha reta).
 // Se To for nil, o walker anda aleatoriamente por MaxSteps passos.
-//
-// Conditions controlam onde o walker pode entrar E onde o tile é escrito.
-// Exemplo: LayerNot{Layer:"terrain", Type:"mato_enraizado"} impede o walker
-// de entrar em células de borda.
-// ConnectPoints executa um random walk a partir de From.
-//
-// Se To não for nil, DirectChance define a probabilidade de cada passo
-// se mover em direção ao destino (0.0 = totalmente aleatório, 1.0 = linha reta).
-// Se To for nil, o walker anda aleatoriamente por MaxSteps passos.
-//
 // Diagonal habilita movimento em 8 direções, deixando os caminhos mais orgânicos.
 // Conditions controlam onde o walker pode entrar E onde o tile é escrito.
 type ConnectPoints struct {
@@ -70,7 +55,6 @@ func (c *ConnectPoints) Execute(ctx *pipeline.Context) error {
 }
 
 func (c *ConnectPoints) nextStep(ctx *pipeline.Context, x, y int) (Point, bool) {
-	// Tenta mover em direção ao destino com DirectChance
 	if c.To != nil && ctx.RNG.Float64() < c.DirectChance {
 		dx, dy := sign(c.To.X-x), sign(c.To.Y-y)
 		for _, d := range directionalCandidates(dx, dy) {
@@ -81,7 +65,6 @@ func (c *ConnectPoints) nextStep(ctx *pipeline.Context, x, y int) (Point, bool) 
 		}
 	}
 
-	// Movimento aleatório
 	available := dirs4
 	if c.Diagonal {
 		available = dirs8

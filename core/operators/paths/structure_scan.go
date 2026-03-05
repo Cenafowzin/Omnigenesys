@@ -1,14 +1,14 @@
-package operators
+package paths
 
-import "procedural_framework/core/pipeline"
+import (
+	"procedural_framework/core/pipeline"
+	"sort"
+)
 
-// structBounds guarda os limites de uma estrutura no grid.
 type structBounds struct {
 	minX, minY, maxX, maxY int
 }
 
-// entryPoint retorna a célula fora da borda da estrutura, no lado que
-// enfrenta `from`, afastada `clearance` células.
 func (b *structBounds) entryPoint(from Point, clearance, gridW, gridH int) Point {
 	cx := (b.minX + b.maxX) / 2
 	cy := (b.minY + b.maxY) / 2
@@ -49,7 +49,6 @@ func (b *structBounds) entryPoint(from Point, clearance, gridW, gridH int) Point
 	return Point{ex, ey}
 }
 
-// scanStructureBounds varre um layer e retorna os bounding boxes de cada tipo de tile.
 func scanStructureBounds(ctx *pipeline.Context, layerName string) map[string]*structBounds {
 	layer := ctx.Grid.GetLayer(layerName)
 	if layer == nil {
@@ -85,16 +84,20 @@ func scanStructureBounds(ctx *pipeline.Context, layerName string) map[string]*st
 	return bounds
 }
 
-// entryPointsFrom retorna os pontos de entrada de todas as estruturas de um layer,
-// no lado que enfrenta `from`.
 func entryPointsFrom(ctx *pipeline.Context, layerName string, from Point, clearance int) []Point {
 	bounds := scanStructureBounds(ctx, layerName)
 	if bounds == nil {
 		return nil
 	}
+	keys := make([]string, 0, len(bounds))
+	for k := range bounds {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	points := make([]Point, 0, len(bounds))
-	for _, b := range bounds {
-		points = append(points, b.entryPoint(from, clearance, ctx.Grid.Width, ctx.Grid.Height))
+	for _, k := range keys {
+		points = append(points, bounds[k].entryPoint(from, clearance, ctx.Grid.Width, ctx.Grid.Height))
 	}
 	return points
 }
@@ -104,4 +107,11 @@ func abs(v int) int {
 		return -v
 	}
 	return v
+}
+
+func randomPoint(ctx *pipeline.Context) Point {
+	return Point{
+		ctx.RNG.Intn(ctx.Grid.Width),
+		ctx.RNG.Intn(ctx.Grid.Height),
+	}
 }

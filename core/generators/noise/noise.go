@@ -10,7 +10,6 @@ type Perlin struct {
 func New(seed int64) *Perlin {
 	p := &Perlin{}
 
-	// Inicializa tabela de permutação com seed determinístico
 	base := make([]int, 256)
 	for i := range base {
 		base[i] = i
@@ -50,7 +49,6 @@ func (p *Perlin) Sample(x, y float64) float64 {
 	x1 := lerp(grad(aa, xf, yf), grad(ba, xf-1, yf), u)
 	x2 := lerp(grad(ab, xf, yf-1), grad(bb, xf-1, yf-1), u)
 
-	// Normaliza de [-1, 1] para [0, 1]
 	return (lerp(x1, x2, v) + 1) / 2
 }
 

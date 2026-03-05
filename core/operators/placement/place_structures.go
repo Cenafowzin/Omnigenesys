@@ -1,4 +1,4 @@
-package operators
+package placement
 
 import (
 	"fmt"
@@ -91,7 +91,6 @@ func (p *PlaceStructures) findPosition(ctx *pipeline.Context, def StructureDef, 
 			continue
 		}
 
-		// Condições avaliadas no centro da estrutura
 		cx, cy := r.X+r.W/2, r.Y+r.H/2
 		if !pipeline.CheckAll(def.Conditions, ctx, cx, cy) {
 			continue

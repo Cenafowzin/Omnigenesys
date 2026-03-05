@@ -5,7 +5,10 @@ import (
 	"log"
 	"procedural_framework/core/export"
 	"procedural_framework/core/grid"
-	"procedural_framework/core/operators"
+	"procedural_framework/core/operators/paths"
+	"procedural_framework/core/operators/placement"
+	"procedural_framework/core/operators/scatter"
+	"procedural_framework/core/operators/terrain"
 	"procedural_framework/core/pipeline"
 )
 
@@ -23,14 +26,14 @@ func main() {
 
 	pipe := pipeline.NewPipeline().
 		// Base
-		AddStep(&operators.Fill{Layer: "terrain", Tile: "floor"}).
-		AddStep(&operators.FillBorder{Layer: "terrain", Tile: "mato_enraizado", Thickness: 2}).
+		AddStep(&terrain.Fill{Layer: "terrain", Tile: "floor"}).
+		AddStep(&terrain.FillBorder{Layer: "terrain", Tile: "mato_enraizado", Thickness: 2}).
 		// Spawn
-		AddStep(&operators.PlaceSpawn{Layer: "entities", Tile: "spawn", OffsetY: 3}).
-		// Estruturas — loja e desafio devem ficar longe do spawn
-		AddStep(&operators.PlaceStructures{
+		AddStep(&placement.PlaceSpawn{Layer: "entities", Tile: "spawn", OffsetY: 3}).
+		// Estruturas — arena e desafio devem ficar longe do spawn
+		AddStep(&placement.PlaceStructures{
 			Layer: "structures",
-			Structures: []operators.StructureDef{
+			Structures: []placement.StructureDef{
 				{
 					Type: "estrutura_arena", Width: 9, Height: 9,
 					Conditions: []pipeline.Condition{
@@ -51,10 +54,10 @@ func main() {
 			AvoidType:   "mato_enraizado",
 		}).
 		// Caminhos via A* — orgânicos mas que chegam no destino
-		AddStep(&operators.ConnectToStructures{
+		AddStep(&paths.ConnectToStructures{
 			Layer:           "terrain",
 			Tile:            "path",
-			From:            operators.Point{X: spawnX, Y: spawnY},
+			From:            paths.Point{X: spawnX, Y: spawnY},
 			StructuresLayer: "structures",
 			RandomWaypoints: 6,
 			Clearance:       3,
@@ -62,11 +65,11 @@ func main() {
 			NoiseScale:      0.12,
 			Conditions: []pipeline.Condition{
 				pipeline.LayerNot{Layer: "terrain", Type: "mato_enraizado"},
-				pipeline.LayerEmpty{Layer: "structures"}, // não atravessa estruturas
+				pipeline.LayerEmpty{Layer: "structures"},
 			},
 		}).
 		// Ramificações a partir dos caminhos existentes — quebra o padrão "star"
-		AddStep(&operators.BranchPaths{
+		AddStep(&paths.BranchPaths{
 			SourceLayer:     "terrain",
 			SourceTile:      "path",
 			Layer:           "terrain",
@@ -82,7 +85,7 @@ func main() {
 			},
 		}).
 		// Vegetação com Perlin noise — só onde for floor e não for path
-		AddStep(&operators.NoiseScatter{
+		AddStep(&scatter.NoiseScatter{
 			Layer: "vegetation", Tile: "mato_alto",
 			Threshold: 0.52, Scale: 0.18,
 			Conditions: []pipeline.Condition{

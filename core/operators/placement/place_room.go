@@ -1,4 +1,4 @@
-package operators
+package placement
 
 import (
 	"fmt"
@@ -41,7 +41,6 @@ func (p *PlaceRoom) Execute(ctx *pipeline.Context) error {
 			if px < 0 || px >= ctx.Grid.Width || py < 0 || py >= ctx.Grid.Height {
 				continue
 			}
-
 			isBorder := dx == 0 || dy == 0 || dx == p.Width-1 || dy == p.Height-1
 			if isBorder {
 				layer.Cells[py][px].Type = p.Wall

@@ -1,18 +1,13 @@
-package operators
+package paths
 
 import (
 	"fmt"
-	"procedural_framework/core/pathfinding"
+	"procedural_framework/core/generators/pathfinding"
 	"procedural_framework/core/pipeline"
 )
 
 // BranchPaths escolhe N células de SourceTile no SourceLayer como origens e
 // conecta cada uma a um destino via A*, criando ramificações da rede de caminhos.
-//
-// Se StructuresLayer estiver definido, os destinos são os pontos de entrada das
-// estruturas encontradas nesse layer. Caso contrário, os destinos são pontos
-// aleatórios no grid.
-//
 // Isso quebra o padrão "star" onde todos os caminhos saem do mesmo ponto,
 // criando uma rede mais orgânica e distribuída.
 type BranchPaths struct {
@@ -38,7 +33,6 @@ func (b *BranchPaths) Execute(ctx *pipeline.Context) error {
 		return fmt.Errorf("branch_paths: layer %q not found", b.Layer)
 	}
 
-	// Coleta todas as células de origem
 	origins := []Point{}
 	for y := 0; y < ctx.Grid.Height; y++ {
 		for x := 0; x < ctx.Grid.Width; x++ {
@@ -51,7 +45,6 @@ func (b *BranchPaths) Execute(ctx *pipeline.Context) error {
 		return fmt.Errorf("branch_paths: no %q cells found in layer %q", b.SourceTile, b.SourceLayer)
 	}
 
-	// Monta lista de destinos
 	clearance := b.Clearance
 	if clearance < 1 {
 		clearance = 1
@@ -88,11 +81,4 @@ func (b *BranchPaths) Execute(ctx *pipeline.Context) error {
 	}
 
 	return nil
-}
-
-func randomPoint(ctx *pipeline.Context) Point {
-	return Point{
-		ctx.RNG.Intn(ctx.Grid.Width),
-		ctx.RNG.Intn(ctx.Grid.Height),
-	}
 }

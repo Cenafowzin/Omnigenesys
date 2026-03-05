@@ -3,7 +3,7 @@ package pathfinding
 import (
 	"container/heap"
 	"math"
-	"procedural_framework/core/noise"
+	"procedural_framework/core/generators/noise"
 	"procedural_framework/core/pipeline"
 )
 
@@ -19,10 +19,10 @@ type node struct {
 
 type priorityQueue []*node
 
-func (pq priorityQueue) Len() int            { return len(pq) }
-func (pq priorityQueue) Less(i, j int) bool  { return pq[i].f < pq[j].f }
-func (pq priorityQueue) Swap(i, j int)       { pq[i], pq[j] = pq[j], pq[i] }
-func (pq *priorityQueue) Push(x any)         { *pq = append(*pq, x.(*node)) }
+func (pq priorityQueue) Len() int           { return len(pq) }
+func (pq priorityQueue) Less(i, j int) bool { return pq[i].f < pq[j].f }
+func (pq priorityQueue) Swap(i, j int)      { pq[i], pq[j] = pq[j], pq[i] }
+func (pq *priorityQueue) Push(x any)        { *pq = append(*pq, x.(*node)) }
 func (pq *priorityQueue) Pop() any {
 	old := *pq
 	n := len(old)
@@ -85,7 +85,6 @@ func FindPath(
 		}
 
 		curKey := key{cur.x, cur.y}
-		// Ignora nós desatualizados na fila
 		if cur.g > gScore[curKey]+1e-9 {
 			continue
 		}
@@ -109,7 +108,7 @@ func FindPath(
 		}
 	}
 
-	return nil // sem caminho
+	return nil
 }
 
 func reconstructPath(parent map[key]key, start, end key) []Point {

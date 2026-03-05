@@ -1,8 +1,8 @@
-package operators
+package scatter
 
 import (
 	"fmt"
-	"procedural_framework/core/noise"
+	"procedural_framework/core/generators/noise"
 	"procedural_framework/core/pipeline"
 )
 
@@ -29,9 +29,7 @@ func (n *NoiseScatter) Execute(ctx *pipeline.Context) error {
 		scale = 0.1
 	}
 
-	// Usa a seed do RNG do context para gerar o noise deterministicamente
-	var seed int64
-	seed = int64(ctx.RNG.Uint64())
+	seed := int64(ctx.RNG.Uint64())
 	gen := noise.New(seed)
 
 	for y := 0; y < ctx.Grid.Height; y++ {

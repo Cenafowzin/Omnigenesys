@@ -1,16 +1,17 @@
-package operators
+package paths
 
 import (
 	"fmt"
-	"procedural_framework/core/pathfinding"
+	"procedural_framework/core/generators/pathfinding"
 	"procedural_framework/core/pipeline"
 )
 
-// PathConnect conecta dois pontos usando A* com ruído no custo de travessia.
+// PathConnect conecta dois pontos explícitos usando A* com ruído no custo de travessia.
 // NoiseFactor controla o quanto o caminho desvia da linha reta:
-//   0.0 = caminho mais curto puro
-//   2-5 = desvios orgânicos (recomendado para estradas de terra)
-//   >8  = desvios muito pronunciados
+//
+//	0.0 = caminho mais curto puro
+//	2-5 = desvios orgânicos (recomendado para estradas de terra)
+//	>8  = desvios muito pronunciados
 type PathConnect struct {
 	Layer       string
 	Tile        string
