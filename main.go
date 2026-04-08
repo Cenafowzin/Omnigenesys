@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	g, err := cornfield.BuildMap(840, 80, 50)
+	g, err := cornfield.BuildMap(512, 80, 50)
 	if err != nil {
 		log.Fatalf("pipeline error: %v", err)
 	}

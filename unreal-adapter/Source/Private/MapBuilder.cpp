@@ -138,6 +138,10 @@ bool AMapBuilder::ParseMapJson(const FString& Json, FMapData& OutMap) const
 
 void AMapBuilder::ProcessLayer(const FMapLayerData& Layer, const FMapData& Map, FRandomStream& Rng)
 {
+	// Actors são spawnados uma vez por região contígua (ex: estrutura completa no centro)
+	SpawnActorRegions(Layer, Rng);
+
+	// Meshes são instanciados por célula (chão, vegetação, etc.)
 	for (int32 Row = 0; Row < Layer.Cells.Num(); ++Row)
 	{
 		const TArray<FMapCellData>& RowData = Layer.Cells[Row];
@@ -146,36 +150,83 @@ void AMapBuilder::ProcessLayer(const FMapLayerData& Layer, const FMapData& Map, 
 			const FString& TileType = RowData[Col].Type;
 			if (TileType.IsEmpty()) continue;
 
-			const FVector WorldPos = TileToWorld(Col, Row);
-
-			// Tenta mesh primeiro (tiles de superfície)
 			if (UStaticMesh* Mesh = Registry->GetMesh(TileType))
 			{
 				UMaterialInterface* Mat = Registry->GetMeshMaterial(TileType);
 				UInstancedStaticMeshComponent* ISM = GetOrCreateMeshComponent(TileType, Mesh, Mat);
-
-				FTransform InstanceTransform(FRotator::ZeroRotator, WorldPos, FVector::OneVector);
+				FTransform InstanceTransform(FRotator::ZeroRotator, TileToWorld(Col, Row), FVector::OneVector);
 				ISM->AddInstance(InstanceTransform);
 			}
-			// Tenta actor depois (estruturas, entidades)
-			else if (TSubclassOf<AActor> ActorClass = Registry->GetActorClass(TileType, Rng))
+		}
+	}
+}
+
+void AMapBuilder::SpawnActorRegions(const FMapLayerData& Layer, FRandomStream& Rng)
+{
+	const int32 NumRows = Layer.Cells.Num();
+	if (NumRows == 0) return;
+	const int32 NumCols = Layer.Cells[0].Num();
+
+	// Marca células já processadas para não spawnar duas vezes
+	TArray<TArray<bool>> Visited;
+	Visited.SetNum(NumRows);
+	for (auto& Row : Visited) Row.SetNumZeroed(NumCols);
+
+	for (int32 Row = 0; Row < NumRows; ++Row)
+	{
+		for (int32 Col = 0; Col < NumCols; ++Col)
+		{
+			if (Visited[Row][Col]) continue;
+
+			const FString& TileType = Layer.Cells[Row][Col].Type;
+			if (TileType.IsEmpty()) continue;
+
+			// Só processa tipos que têm mapeamento de actor
+			TSubclassOf<AActor> ActorClass = Registry->GetActorClass(TileType, Rng);
+			if (!ActorClass) continue;
+
+			// BFS para encontrar toda a região contígua deste tipo
+			int32 MinCol = Col, MaxCol = Col, MinRow = Row, MaxRow = Row;
+
+			TQueue<TPair<int32,int32>> Queue;
+			Queue.Enqueue({Col, Row});
+			Visited[Row][Col] = true;
+
+			while (!Queue.IsEmpty())
 			{
-				FActorSpawnParameters Params;
-				Params.Owner = this;
+				TPair<int32,int32> Current;
+				Queue.Dequeue(Current);
+				const int32 C = Current.Key;
+				const int32 R = Current.Value;
 
-				AActor* Spawned = GetWorld()->SpawnActor<AActor>(
-					ActorClass,
-					WorldPos,
-					FRotator::ZeroRotator,
-					Params
-				);
+				MinCol = FMath::Min(MinCol, C);
+				MaxCol = FMath::Max(MaxCol, C);
+				MinRow = FMath::Min(MinRow, R);
+				MaxRow = FMath::Max(MaxRow, R);
 
-				if (Spawned)
+				// 4-vizinhos
+				const TPair<int32,int32> Neighbors[] = {{C+1,R},{C-1,R},{C,R+1},{C,R-1}};
+				for (const auto& N : Neighbors)
 				{
-					// Mantém hierarquia na cena para organização
-					Spawned->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
-					SpawnedActors.Add(Spawned);
+					const int32 NC = N.Key, NR = N.Value;
+					if (NR < 0 || NR >= NumRows || NC < 0 || NC >= NumCols) continue;
+					if (Visited[NR][NC]) continue;
+					if (Layer.Cells[NR][NC].Type != TileType) continue;
+					Visited[NR][NC] = true;
+					Queue.Enqueue({NC, NR});
 				}
+			}
+
+			// Spawna 1 actor no centro da região
+			const FVector WorldCenter = RegionCenterToWorld(MinCol, MinRow, MaxCol, MaxRow);
+
+			FActorSpawnParameters Params;
+			Params.Owner = this;
+			AActor* Spawned = GetWorld()->SpawnActor<AActor>(ActorClass, WorldCenter, FRotator::ZeroRotator, Params);
+			if (Spawned)
+			{
+				Spawned->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
+				SpawnedActors.Add(Spawned);
 			}
 		}
 	}
@@ -183,22 +234,22 @@ void AMapBuilder::ProcessLayer(const FMapLayerData& Layer, const FMapData& Map, 
 
 FVector AMapBuilder::TileToWorld(int32 Col, int32 Row) const
 {
-	// Go: (0,0) = canto superior esquerdo, Y cresce para baixo
-	// Unreal: X = direita, Y = profundidade, Z = cima
-	// Conversão: X = col * TileSize, Y = -row * TileSize (flip Y, igual ao Unity)
-	return FVector(
-		Col * TileSize,
-		-Row * TileSize,
-		BaseZ
-	);
+	return FVector(-Col * TileSize, -Row * TileSize, BaseZ);
+}
+
+FVector AMapBuilder::RegionCenterToWorld(int32 MinCol, int32 MinRow, int32 MaxCol, int32 MaxRow) const
+{
+	const float CenterCol = (MinCol + MaxCol) * 0.5f;
+	const float CenterRow = (MinRow + MaxRow) * 0.5f;
+	return FVector(-(CenterCol - 0.5f) * TileSize, -(CenterRow - 0.5f) * TileSize, BaseZ);
 }
 
 UInstancedStaticMeshComponent* AMapBuilder::GetOrCreateMeshComponent(
 	const FString& TileType, UStaticMesh* Mesh, UMaterialInterface* Mat)
 {
-	if (UInstancedStaticMeshComponent** Existing = MeshInstances.Find(TileType))
+	if (TObjectPtr<UInstancedStaticMeshComponent>* Existing = MeshInstances.Find(TileType))
 	{
-		return *Existing;
+		return Existing->Get();
 	}
 
 	UInstancedStaticMeshComponent* ISM = NewObject<UInstancedStaticMeshComponent>(this);
