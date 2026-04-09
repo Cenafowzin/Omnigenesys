@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"log"
 	"omnigenesys/core/export"
-	"omnigenesys/maps/cornfield"
+	"omnigenesys/maps/example"
 )
 
 func main() {
-	g, err := cornfield.BuildMap(512, 80, 50)
+	g, err := example.BuildMap(512, 80, 50)
 	if err != nil {
 		log.Fatalf("pipeline error: %v", err)
 	}

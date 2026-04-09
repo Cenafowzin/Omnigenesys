@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-UNREAL_CONTENT="unreal-plugin/Content/MapGen"
+UNREAL_CONTENT="unreal-plugin/Omnigenesys/Content/MapGen"
 UNITY_STREAMING="unity-package/StreamingAssets~/MapGen"
 # GODOT_CONTENT="godot-addon/bin"
 

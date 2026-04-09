@@ -1,4 +1,4 @@
-package cornfield
+package example
 
 import (
 	"omnigenesys/core/grid"
@@ -9,7 +9,7 @@ import (
 	"omnigenesys/core/pipeline"
 )
 
-// BuildMap cria e executa a pipeline do mapa cornfield.
+// BuildMap cria e executa a pipeline de exemplo do Omnigenesys.
 // Retorna o Grid2D pronto para exportação.
 func BuildMap(seed int64, width, height int) (*grid.Grid2D, error) {
 	g := grid.NewGrid2D(width, height)
@@ -25,7 +25,7 @@ func BuildMap(seed int64, width, height int) (*grid.Grid2D, error) {
 
 	pipe := pipeline.NewPipeline().
 		AddStep(&terrain.Fill{Layer: "terrain", Tile: "floor"}).
-		AddStep(&terrain.FillBorder{Layer: "terrain", Tile: "mato_enraizado", Thickness: 2}).
+		AddStep(&terrain.FillBorder{Layer: "terrain", Tile: "border", Thickness: 2}).
 		AddStep(&placement.PlacePoint{
 			Layer:   "entities",
 			Tile:    "spawn",
@@ -37,23 +37,23 @@ func BuildMap(seed int64, width, height int) (*grid.Grid2D, error) {
 			Layer: "structures",
 			Structures: []placement.StructureDef{
 				{
-					Type: "estrutura_arena", Width: 9, Height: 9,
+					Type: "zone_a", Width: 9, Height: 9,
 					Conditions: []pipeline.Condition{
 						pipeline.NotNearType{Layer: "entities", Type: "spawn", Distance: 25},
 					},
 				},
 				{
-					Type: "estrutura_desafio", Width: 7, Height: 7,
+					Type: "zone_b", Width: 7, Height: 7,
 					Conditions: []pipeline.Condition{
 						pipeline.NotNearType{Layer: "entities", Type: "spawn", Distance: 25},
 					},
 				},
-				{Type: "estrutura_loja", Width: 6, Height: 6},
-				{Type: "estrutura_item", Width: 4, Height: 4},
+				{Type: "zone_c", Width: 6, Height: 6},
+				{Type: "zone_d", Width: 4, Height: 4},
 			},
 			MinDistance: 5,
 			AvoidLayer:  "terrain",
-			AvoidType:   "mato_enraizado",
+			AvoidType:   "border",
 		}).
 		AddStep(&paths.ConnectToStructures{
 			Layer:           "terrain",
@@ -64,7 +64,7 @@ func BuildMap(seed int64, width, height int) (*grid.Grid2D, error) {
 			NoiseFactor:     4.0,
 			NoiseScale:      0.12,
 			Conditions: []pipeline.Condition{
-				pipeline.LayerNot{Layer: "terrain", Type: "mato_enraizado"},
+				pipeline.LayerNot{Layer: "terrain", Type: "border"},
 				pipeline.LayerEmpty{Layer: "structures"},
 			},
 		}).
@@ -79,7 +79,7 @@ func BuildMap(seed int64, width, height int) (*grid.Grid2D, error) {
 			NoiseFactor:     3.5,
 			NoiseScale:      0.12,
 			Conditions: []pipeline.Condition{
-				pipeline.LayerNot{Layer: "terrain", Type: "mato_enraizado"},
+				pipeline.LayerNot{Layer: "terrain", Type: "border"},
 				pipeline.LayerEmpty{Layer: "structures"},
 			},
 		}).
@@ -92,13 +92,13 @@ func BuildMap(seed int64, width, height int) (*grid.Grid2D, error) {
 			NoiseFactor: 2.0,
 			NoiseScale:  0.12,
 			Conditions: []pipeline.Condition{
-				pipeline.LayerNot{Layer: "terrain", Type: "mato_enraizado"},
+				pipeline.LayerNot{Layer: "terrain", Type: "border"},
 				pipeline.LayerEmpty{Layer: "structures"},
 			},
 		}).
 		AddStep(&scatter.NoiseScatter{
 			Layer:     "vegetation",
-			Tile:      "mato_alto",
+			Tile:      "foliage",
 			Threshold: 0.52,
 			Scale:     0.18,
 			Conditions: []pipeline.Condition{

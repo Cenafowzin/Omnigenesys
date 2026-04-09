@@ -1,33 +1,48 @@
 # Omnigenesys
 
-Framework procedural genérico para geração de mapas em Go, agnóstico de engine. Exporta mapas via JSON e integra com qualquer engine através de adapters oficiais.
+Framework procedural genérico para geração de mapas em Go, agnóstico de engine. Define mapas via pipeline JSON e integra com qualquer engine através de adapters oficiais.
 
 ## Como funciona
 
-O Omnigenesys roda como um subprocess chamado pela engine. Recebe uma pipeline JSON via stdin, gera o mapa e retorna o resultado via stdout.
-
 ```
-Pipeline JSON → mapgen → Mapa JSON → Engine (Unity / Unreal / Godot)
+Pipeline JSON → mapgen (Go) → Mapa JSON → Engine (Unreal / Unity / Godot)
 ```
 
-## Integração com Engines
+O `mapgen` roda como subprocess chamado pela engine. Recebe uma configuração de pipeline, gera o mapa deterministicamente por seed e retorna o resultado como JSON.
 
-### Unity
-Instale via **Package Manager → Add package from disk** selecionando `unity-package/package.json`.
-O `mapgen.exe` é copiado para `StreamingAssets/` automaticamente.
+## Adapters disponíveis
 
-### Unreal Engine
-Copie a pasta `unreal-plugin/` para `<Projeto>/Plugins/Omnigenesys/` e compile.
-Consulte `unreal-plugin/INSTALL.md` para o setup completo.
+| Engine | Pasta | Status |
+|--------|-------|--------|
+| Unreal Engine 5 | `unreal-plugin/Omnigenesys/` | Funcional |
+| Unity | `unity-package/` | Funcional |
 
 ## Build
 
+Use o script `build.sh` para compilar e distribuir o `mapgen` para os adapters automaticamente:
+
 ```bash
-bash build.sh           # Windows (padrão)
-bash build.sh all       # Windows + Linux + Mac
+./build.sh            # Windows (padrão)
+./build.sh linux      # Linux
+./build.sh mac        # macOS
+./build.sh all        # todas as plataformas
 ```
 
-Gera o `mapgen.exe` e distribui para os adapters automaticamente.
+O binário é copiado automaticamente para:
+- `unreal-plugin/Omnigenesys/Content/MapGen/`
+- `unity-package/StreamingAssets~/MapGen/`
+
+## Integração Unreal Engine
+
+Copie `unreal-plugin/Omnigenesys/` para `<Projeto>/Plugins/Omnigenesys/` e consulte `INSTALL.md` dentro da pasta.
+
+## Integração Unity
+
+Instale via **Package Manager → Add package from disk** selecionando `unity-package/package.json`.
+
+## Pipelines
+
+Mapas são definidos por pipelines JSON. Veja [PIPELINE.md](PIPELINE.md) para a referência completa de operators, conditions e exemplos.
 
 ## Licença
 
