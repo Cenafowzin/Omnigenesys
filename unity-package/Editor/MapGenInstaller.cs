@@ -2,7 +2,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace ProceduralFramework.Editor
+namespace Omnigenesys.Editor
 {
     /// <summary>
     /// Copia automaticamente o mapgen.exe de StreamingAssets~/ para
@@ -26,7 +26,7 @@ namespace ProceduralFramework.Editor
             var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(MapGenInstaller).Assembly);
             if (packageInfo == null)
             {
-                Debug.LogWarning("[ProceduralMapFramework] Não foi possível localizar o package.");
+                Debug.LogWarning("[Omnigenesys] Não foi possível localizar o package.");
                 return;
             }
 
@@ -34,7 +34,7 @@ namespace ProceduralFramework.Editor
             if (!Directory.Exists(source))
             {
                 Debug.LogWarning(
-                    $"[ProceduralMapFramework] Pasta StreamingAssets~ não encontrada: {source}\n" +
+                    $"[Omnigenesys] Pasta StreamingAssets~ não encontrada: {source}\n" +
                     "Execute build.sh para gerar o mapgen.exe antes de distribuir o package.");
                 return;
             }
@@ -51,7 +51,7 @@ namespace ProceduralFramework.Editor
             }
 
             AssetDatabase.Refresh();
-            Debug.Log($"[ProceduralMapFramework] {count} arquivo(s) instalados em {dest}");
+            Debug.Log($"[Omnigenesys] {count} arquivo(s) instalados em {dest}");
         }
     }
 }

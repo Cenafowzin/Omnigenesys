@@ -11,6 +11,7 @@
 
 # Output gerado
 *.json
+!unity-package/package.json
 *.png
 
 # Módulos Go

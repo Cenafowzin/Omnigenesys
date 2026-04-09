@@ -2,7 +2,7 @@ package placement
 
 import (
 	"fmt"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/pipeline"
 )
 
 // PlacePoint coloca um único tile numa posição calculada por âncoras.

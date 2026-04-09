@@ -4,7 +4,7 @@ using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
-namespace ProceduralFramework
+namespace Omnigenesys
 {
     /// <summary>
     /// Constrói o mapa na cena Unity a partir do JSON gerado pelo framework Go.

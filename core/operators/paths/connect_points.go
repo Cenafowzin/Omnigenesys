@@ -2,7 +2,7 @@ package paths
 
 import (
 	"fmt"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/pipeline"
 )
 
 // ConnectPoints executa um random walk a partir de From.

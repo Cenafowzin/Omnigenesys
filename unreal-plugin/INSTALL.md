@@ -1,11 +1,11 @@
-# ProceduralMapFramework — Instalação do Plugin
+# Omnigenesys — Instalação do Plugin
 
 ## 1. Instalar o plugin
 
-Copie a pasta `ProceduralMapFramework` (esta pasta inteira) para:
+Copie a pasta `Omnigenesys` (esta pasta inteira) para:
 
 ```
-<SeuProjeto>/Plugins/ProceduralMapFramework/
+<SeuProjeto>/Plugins/Omnigenesys/
 ```
 
 > Se a pasta `Plugins/` não existir no projeto, crie-a.
@@ -26,7 +26,7 @@ GOOS=windows GOARCH=amd64 go build -o mapgen.exe .
 ```
 
 ```
-Plugins/ProceduralMapFramework/Content/MapGen/
+Plugins/Omnigenesys/Content/MapGen/
 ├── mapgen.exe
 └── cornfield_pipeline.json   ← ou sua pipeline customizada
 ```

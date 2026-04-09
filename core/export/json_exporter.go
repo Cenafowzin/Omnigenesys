@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"procedural_framework/core/grid"
+	"omnigenesys/core/grid"
 )
 
 type exportedCell struct {

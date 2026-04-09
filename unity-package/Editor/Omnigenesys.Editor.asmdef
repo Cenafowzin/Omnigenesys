@@ -1,8 +1,8 @@
 {
-    "name": "ProceduralFramework.Editor",
-    "rootNamespace": "ProceduralFramework.Editor",
+    "name": "Omnigenesys.Editor",
+    "rootNamespace": "Omnigenesys.Editor",
     "references": [
-        "ProceduralFramework.Runtime"
+        "Omnigenesys.Runtime"
     ],
     "includePlatforms": [
         "Editor"

@@ -2,7 +2,7 @@ package placement
 
 import (
 	"fmt"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/pipeline"
 )
 
 type StructureDef struct {

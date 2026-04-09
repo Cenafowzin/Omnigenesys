@@ -2,7 +2,7 @@ package pipeline
 
 import (
 	"math/rand"
-	"procedural_framework/core/grid"
+	"omnigenesys/core/grid"
 )
 
 type Context struct {

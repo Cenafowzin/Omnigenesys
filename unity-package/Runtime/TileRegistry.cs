@@ -3,16 +3,16 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 
-namespace ProceduralFramework
+namespace Omnigenesys
 {
     /// <summary>
     /// Mapeia os tile types do framework (strings) para assets Unity.
-    /// Crie um asset via: Assets → Create → ProceduralFramework → TileRegistry
+    /// Crie um asset via: Assets → Create → Omnigenesys → TileRegistry
     ///
     /// Tile types que mapeiam para TileBase são colocados em Tilemaps.
     /// Tile types que mapeiam para Prefab são instanciados como GameObjects.
     /// </summary>
-    [CreateAssetMenu(fileName = "TileRegistry", menuName = "ProceduralFramework/TileRegistry")]
+    [CreateAssetMenu(fileName = "TileRegistry", menuName = "Omnigenesys/TileRegistry")]
     public class TileRegistry : ScriptableObject
     {
         [Serializable]

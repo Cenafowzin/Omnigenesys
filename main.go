@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
-	"procedural_framework/core/export"
-	"procedural_framework/maps/cornfield"
+	"omnigenesys/core/export"
+	"omnigenesys/maps/cornfield"
 )
 
 func main() {

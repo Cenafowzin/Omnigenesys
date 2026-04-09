@@ -2,8 +2,8 @@
     "FileVersion": 3,
     "Version": 1,
     "VersionName": "1.0",
-    "FriendlyName": "Procedural Map Framework",
-    "Description": "Integração com o Procedural Map Framework (Go) para geração procedural de mapas via pipeline JSON.",
+    "FriendlyName": "Omnigenesys",
+    "Description": "Geração procedural de mapas via pipeline JSON usando o Omnigenesys.",
     "Category": "Procedural Generation",
     "CreatedBy": "Rodrigo Dubeux",
     "CreatedByURL": "",
@@ -16,7 +16,7 @@
     "Installed": false,
     "Modules": [
         {
-            "Name": "ProceduralMapFramework",
+            "Name": "Omnigenesys",
             "Type": "Runtime",
             "LoadingPhase": "Default"
         }

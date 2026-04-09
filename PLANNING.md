@@ -1,4 +1,4 @@
-# Procedural Framework — Planning
+# Omnigenesys — Planning
 
 ## Visão geral
 
@@ -10,7 +10,7 @@ Exporta para JSON e é consumido por adapters de engine (Unity, Godot, etc.).
 ## Arquitetura do Framework (Go)
 
 ```
-procedural_framework/
+omnigenesys/
 ├── core/
 │   ├── grid/            → Grid2D, Layer, Cell
 │   ├── pipeline/        → Pipeline, Operator, Context, Condition

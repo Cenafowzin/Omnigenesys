@@ -1,7 +1,7 @@
 package paths
 
 import (
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/pipeline"
 	"sort"
 )
 

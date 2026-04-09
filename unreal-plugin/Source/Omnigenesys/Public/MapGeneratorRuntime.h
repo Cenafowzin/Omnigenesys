@@ -24,7 +24,7 @@ class AMapBuilder;
  *   - Crie um Actor AMapGeneratorRuntime na cena e configure as referências
  */
 UCLASS()
-class PROCEDURALMAPFRAMEWORK_API AMapGeneratorRuntime : public AActor
+class OMNIGENESYS_API AMapGeneratorRuntime : public AActor
 {
 	GENERATED_BODY()
 

@@ -7,8 +7,8 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"procedural_framework/core/export"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/export"
+	"omnigenesys/core/pipeline"
 	"time"
 )
 

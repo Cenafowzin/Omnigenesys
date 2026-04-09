@@ -2,7 +2,7 @@ package scatter
 
 import (
 	"fmt"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/pipeline"
 )
 
 // Scatter preenche células aleatoriamente num layer com base numa chance (0.0 a 1.0).

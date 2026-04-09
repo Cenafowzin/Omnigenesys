@@ -2,8 +2,8 @@ package paths
 
 import (
 	"fmt"
-	"procedural_framework/core/generators/pathfinding"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/generators/pathfinding"
+	"omnigenesys/core/pipeline"
 )
 
 // BranchPaths escolhe N células de SourceTile no SourceLayer como origens e

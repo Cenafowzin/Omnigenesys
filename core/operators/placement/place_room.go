@@ -2,7 +2,7 @@ package placement
 
 import (
 	"fmt"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/pipeline"
 )
 
 // PlaceRoom coloca um retângulo preenchido com Floor e borda com Wall num layer.

@@ -5,7 +5,7 @@ using Newtonsoft.Json.Linq;
 using Newtonsoft.Json;
 using UnityEngine;
 
-namespace ProceduralFramework
+namespace Omnigenesys
 {
     /// <summary>
     /// Gera mapas em runtime chamando o binário Go como subprocess.

@@ -2,7 +2,7 @@ package terrain
 
 import (
 	"fmt"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/pipeline"
 )
 
 // FillBorder preenche as bordas do mapa com um tile até a espessura indicada.

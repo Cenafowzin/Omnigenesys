@@ -1,12 +1,12 @@
 package cornfield
 
 import (
-	"procedural_framework/core/grid"
-	"procedural_framework/core/operators/paths"
-	"procedural_framework/core/operators/placement"
-	"procedural_framework/core/operators/scatter"
-	"procedural_framework/core/operators/terrain"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/grid"
+	"omnigenesys/core/operators/paths"
+	"omnigenesys/core/operators/placement"
+	"omnigenesys/core/operators/scatter"
+	"omnigenesys/core/operators/terrain"
+	"omnigenesys/core/pipeline"
 )
 
 // BuildMap cria e executa a pipeline do mapa cornfield.

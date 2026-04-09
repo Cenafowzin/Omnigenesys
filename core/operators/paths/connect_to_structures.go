@@ -2,8 +2,8 @@ package paths
 
 import (
 	"fmt"
-	"procedural_framework/core/generators/pathfinding"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/generators/pathfinding"
+	"omnigenesys/core/pipeline"
 )
 
 // ConnectToStructures varre o StructuresLayer, calcula o ponto de entrada de cada

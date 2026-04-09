@@ -53,7 +53,7 @@ struct FTileActorMapping
  *   Content Browser → clique direito → Miscellaneous → Data Asset → TileRegistry
  */
 UCLASS(BlueprintType)
-class PROCEDURALMAPFRAMEWORK_API UTileRegistry : public UDataAsset
+class OMNIGENESYS_API UTileRegistry : public UDataAsset
 {
 	GENERATED_BODY()
 

@@ -2,8 +2,8 @@ package paths
 
 import (
 	"fmt"
-	"procedural_framework/core/generators/pathfinding"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/generators/pathfinding"
+	"omnigenesys/core/pipeline"
 )
 
 // PathConnect conecta dois pontos explícitos usando A* com ruído no custo de travessia.

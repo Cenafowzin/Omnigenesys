@@ -2,8 +2,8 @@ package scatter
 
 import (
 	"fmt"
-	"procedural_framework/core/generators/noise"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/generators/noise"
+	"omnigenesys/core/pipeline"
 )
 
 // NoiseScatter espalha um tile usando Perlin noise.

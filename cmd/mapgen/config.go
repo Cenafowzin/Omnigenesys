@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
-	"procedural_framework/core/grid"
-	"procedural_framework/core/operators/paths"
-	"procedural_framework/core/operators/placement"
-	"procedural_framework/core/operators/scatter"
-	"procedural_framework/core/operators/terrain"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/grid"
+	"omnigenesys/core/operators/paths"
+	"omnigenesys/core/operators/placement"
+	"omnigenesys/core/operators/scatter"
+	"omnigenesys/core/operators/terrain"
+	"omnigenesys/core/pipeline"
 )
 
 // PipelineConfig é o formato JSON que o Unity envia para o mapgen.

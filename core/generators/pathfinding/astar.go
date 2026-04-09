@@ -3,8 +3,8 @@ package pathfinding
 import (
 	"container/heap"
 	"math"
-	"procedural_framework/core/generators/noise"
-	"procedural_framework/core/pipeline"
+	"omnigenesys/core/generators/noise"
+	"omnigenesys/core/pipeline"
 )
 
 type Point struct{ X, Y int }

@@ -1,6 +1,6 @@
 {
-    "name": "ProceduralFramework.Runtime",
-    "rootNamespace": "ProceduralFramework",
+    "name": "Omnigenesys.Runtime",
+    "rootNamespace": "Omnigenesys",
     "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],

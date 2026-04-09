@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class ProceduralMapFramework : ModuleRules
+public class Omnigenesys : ModuleRules
 {
-    public ProceduralMapFramework(ReadOnlyTargetRules Target) : base(Target)
+    public Omnigenesys(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 

@@ -22,7 +22,7 @@ class UInstancedStaticMeshComponent;
  *   Unreal: X = -col * TileSize, Y = -row * TileSize, Z = BaseZ
  */
 UCLASS()
-class PROCEDURALMAPFRAMEWORK_API AMapBuilder : public AActor
+class OMNIGENESYS_API AMapBuilder : public AActor
 {
 	GENERATED_BODY()
 

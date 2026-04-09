@@ -20,7 +20,7 @@ static FString ResolvePath(const FString& RelativePath)
 		return FPaths::Combine(FPaths::ProjectContentDir(), RelativePath.Mid(8));
 	}
 
-	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("ProceduralMapFramework"));
+	TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("Omnigenesys"));
 	const FString Base = Plugin.IsValid() ? Plugin->GetContentDir() : FPaths::ProjectContentDir();
 	return FPaths::Combine(Base, RelativePath);
 }
