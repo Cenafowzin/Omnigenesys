@@ -1,6 +1,8 @@
 # Binários
 *.exe
 *.exe~
+!unity-package/StreamingAssets~/MapGen/mapgen.exe
+!unreal-plugin/Omnigenesys/Content/MapGen/mapgen.exe
 *.dll
 *.so
 *.dylib
