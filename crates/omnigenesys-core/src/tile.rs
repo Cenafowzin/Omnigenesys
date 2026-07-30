@@ -9,6 +9,12 @@ pub struct TileRegistry{
     next_id: TileId,
 }
 
+impl Default for TileRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TileRegistry{
     pub fn new() -> Self {
         let mut registry = TileRegistry {
@@ -20,8 +26,17 @@ impl TileRegistry{
         registry
     }
 
-    pub fn name(&self, id: TileId) -> &str {
-        &self.to_name[id as usize]
+    pub fn get(&self, name: &str) -> Option<TileId> {
+        self.to_id.get(name).copied()
+    }
+
+    pub fn name(&self, id: TileId) -> Option<&str> {
+        self.to_name.get(id as usize).map(String::as_str)
+    }
+
+    /// Tile names ordered by id — the string table of output v2.
+    pub fn names(&self) -> &[String] {
+        &self.to_name
     }
 
     pub fn get_or_insert(&mut self, name: &str) -> TileId {

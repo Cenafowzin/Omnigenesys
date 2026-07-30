@@ -1,4 +1,23 @@
+pub mod context;
 pub mod coords;
-pub mod tile;
-pub mod layer;
+pub mod error;
 pub mod grid;
+pub mod layer;
+pub mod output;
+pub mod pipeline;
+pub mod registry;
+pub mod rng;
+pub mod spec;
+pub mod tile;
+
+pub use context::Context;
+pub use coords::{Coord, GridSize};
+pub use error::{OpError, PipelineError};
+pub use grid::Grid;
+pub use layer::Layer;
+pub use output::MapOutput;
+pub use pipeline::{Pipeline, RunOutcome};
+pub use registry::{Dimensions, Operator, OperatorEntry, OperatorRegistry};
+pub use rng::derive_step_rng;
+pub use spec::{PipelineSpec, StepSpec, FORMAT_VERSION};
+pub use tile::{TileId, TileRegistry, EMPTY};

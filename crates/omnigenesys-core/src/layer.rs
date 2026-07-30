@@ -48,6 +48,29 @@ impl Layer{
         self.get(x, y, z).unwrap_or(EMPTY)
     }
 
+    pub fn metadata(&self, x: i32, y: i32, z: i32) -> Option<&HashMap<String, Value>> {
+        if self.in_bounds(x, y, z) {
+            self.metadata.get(&self.index(x, y, z))
+        } else {
+            None
+        }
+    }
+
+    pub fn set_metadata(&mut self, x: i32, y: i32, z: i32, key: &str, value: Value) -> bool {
+        if self.in_bounds(x, y, z) {
+            let index = self.index(x, y, z);
+            self.metadata.entry(index).or_default().insert(key.to_string(), value);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Flat cell storage in z-major/y-major order — feeds RLE export.
+    pub fn cells(&self) -> &[TileId] {
+        &self.cells
+    }
+
     pub fn set(&mut self, x: i32, y: i32, z: i32, tile_id: TileId) -> bool {
         if self.in_bounds(x, y, z) {
             let index = self.index(x, y, z);
