@@ -2,7 +2,9 @@
 
 Engine-agnostic procedural map generation framework. Define maps as declarative JSON pipelines; generate deterministically by seed; consume from any engine via CLI, FFI or WASM.
 
-Rust rewrite of the original Go framework. See [PLANNING.md](PLANNING.md) and [ROADMAP.md](ROADMAP.md).
+Rust rewrite of the original Go framework. Implementation phases: [ROADMAP.md](ROADMAP.md).
+
+**Status: pre-alpha.** The spatial base is being implemented; nothing is usable yet.
 
 ## License
 
