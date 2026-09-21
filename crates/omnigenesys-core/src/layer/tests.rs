@@ -158,3 +158,57 @@ fn as_tiles_mut_writes_through_the_enum() {
     let written = any.as_tiles().expect("layer is Tiles").get(c);
     assert_eq!(written, Some(&TileId(3)));
 }
+
+// cells / cells_mut / iter
+
+/// Gives every cell a different value, so a shifted pairing cannot pass.
+fn layer_numbered_in_bounds_order() -> Layer<u16> {
+    let mut layer = Layer::new(sample_bounds(), 0u16);
+    for (i, c) in sample_bounds().iter().enumerate() {
+        layer.set(c, i as u16).unwrap();
+    }
+    layer
+}
+
+#[test]
+fn cells_yields_one_value_per_cell_in_memory_order() {
+    let layer = layer_numbered_in_bounds_order();
+    let values: Vec<u16> = layer.cells().copied().collect();
+    let expected: Vec<u16> = (0..sample_bounds().size.len() as u16).collect();
+    assert_eq!(values, expected);
+}
+
+#[test]
+fn cells_mut_writes_every_cell() {
+    let mut layer = Layer::new(sample_bounds(), 0u16);
+    for cell in layer.cells_mut() {
+        *cell = 5;
+    }
+    for c in sample_bounds().iter() {
+        assert_eq!(layer.get(c), Some(&5), "cell {c:?}");
+    }
+}
+
+#[test]
+fn iter_visits_every_coord_in_bounds_order() {
+    let layer = Layer::new(sample_bounds(), 0u16);
+    let coords: Vec<Coord> = layer.iter().map(|(c, _)| c).collect();
+    let expected: Vec<Coord> = sample_bounds().iter().collect();
+    assert_eq!(coords, expected);
+}
+
+#[test]
+fn iter_pairs_each_coord_with_the_value_get_returns() {
+    let layer = layer_numbered_in_bounds_order();
+    for (c, value) in layer.iter() {
+        assert_eq!(Some(value), layer.get(c), "cell {c:?}");
+    }
+}
+
+#[test]
+fn empty_layer_yields_no_cells_and_no_pairs() {
+    let bounds = Bounds::new(Coord::new(10, 20, 5), GridSize::new(0, 3, 2));
+    let layer = Layer::new(bounds, 0u16);
+    assert_eq!(layer.cells().count(), 0);
+    assert_eq!(layer.iter().count(), 0);
+}

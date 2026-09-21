@@ -61,6 +61,18 @@ impl<T> Layer<T> {
         self.cells[i] = value;
         Ok(())
     }
+
+    pub fn cells(&self) -> impl Iterator<Item = &T> {
+        self.cells.iter()
+    }
+
+    pub fn cells_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.cells.iter_mut()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Coord, &T)> {
+        self.bounds.iter().zip(self.cells.iter())
+    }
 }
 
 impl AnyLayer {
