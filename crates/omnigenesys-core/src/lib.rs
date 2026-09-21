@@ -6,3 +6,4 @@
 pub mod bounds;
 pub mod coords;
 pub mod layer;
+pub mod tile;

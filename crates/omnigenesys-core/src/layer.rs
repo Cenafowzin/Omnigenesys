@@ -1,10 +1,22 @@
 use crate::bounds::Bounds;
 use crate::coords::Coord;
+use crate::tile::TileId;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer<T> {
     bounds: Bounds,
     cells: Box<[T]>,
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnyLayer {
+    Tiles(Layer<TileId>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LayerKind {
+    Tiles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +60,32 @@ impl<T> Layer<T> {
         })?;
         self.cells[i] = value;
         Ok(())
+    }
+}
+
+impl AnyLayer {
+    pub fn kind(&self) -> LayerKind {
+        match self {
+            AnyLayer::Tiles(_) => LayerKind::Tiles,
+        }
+    }
+
+    pub fn bounds(&self) -> Bounds {
+        match self {
+            AnyLayer::Tiles(layer) => layer.bounds(),
+        }
+    }
+
+    pub fn as_tiles(&self) -> Option<&Layer<TileId>> {
+        match self {
+            AnyLayer::Tiles(layer) => Some(layer),
+        }
+    }
+
+    pub fn as_tiles_mut(&mut self) -> Option<&mut Layer<TileId>> {
+        match self {
+            AnyLayer::Tiles(layer) => Some(layer),
+        }
     }
 }
 

@@ -121,3 +121,40 @@ fn layer_works_with_non_copy_elements() {
     assert_eq!(layer.get(c).map(String::as_str), Some("wall"));
     assert_eq!(layer.get(origin).map(String::as_str), Some("floor"));
 }
+
+// AnyLayer
+
+fn sample_tiles_layer() -> Layer<TileId> {
+    Layer::new(sample_bounds(), TileId(0))
+}
+
+#[test]
+fn any_layer_reports_its_kind() {
+    let any = AnyLayer::Tiles(sample_tiles_layer());
+    assert_eq!(any.kind(), LayerKind::Tiles);
+}
+
+#[test]
+fn any_layer_exposes_the_bounds_of_the_inner_layer() {
+    let any = AnyLayer::Tiles(sample_tiles_layer());
+    assert_eq!(any.bounds(), sample_bounds());
+}
+
+#[test]
+fn as_tiles_returns_the_inner_layer() {
+    let any = AnyLayer::Tiles(sample_tiles_layer());
+    let layer = any.as_tiles().expect("layer is Tiles");
+    assert_eq!(layer.get(sample_bounds().origin), Some(&TileId(0)));
+}
+
+#[test]
+fn as_tiles_mut_writes_through_the_enum() {
+    let mut any = AnyLayer::Tiles(sample_tiles_layer());
+    let c = Coord::new(12, 21, 6);
+    any.as_tiles_mut()
+        .expect("layer is Tiles")
+        .set(c, TileId(3))
+        .unwrap();
+    let written = any.as_tiles().expect("layer is Tiles").get(c);
+    assert_eq!(written, Some(&TileId(3)));
+}
