@@ -5,5 +5,6 @@
 //! Declare each module here as it is written.
 pub mod bounds;
 pub mod coords;
+pub mod grid;
 pub mod layer;
 pub mod tile;
