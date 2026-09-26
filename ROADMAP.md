@@ -41,18 +41,19 @@ pipeline.schema.json             → gerado de `spec::pipeline_schema()` (schema
 Estimativa assume familiaridade com Rust; aprendendo a linguagem, contar 2–3×.
 
 ### 1.1 Core (2-3 dias)
+⚠️ **Revisto em 2026-09-26**: os `[x]` abaixo refletem o branch `fase-0-ai-reference`, **não a `main`**. Na `main`, a base espacial foi reimplementada do zero (PLANNING §8.10: `Coord`/`GridSize`, `Bounds`, `Layer<T>`, `AnyLayer`, `Grid`, iteradores — todos concluídos), e `TileRegistry`, `Context`, `Operator`, `OperatorRegistry`, `Pipeline`, `PipelineSpec` e erros **ainda não existem** lá.
 - [x] `GridSize` (width, height, depth — depth=1 para 2D)
 - [x] `Coord` (x, y, z — z=0 para 2D)
-- [x] `TileId = u16` com `EMPTY = 0`
+- [x] `TileId = u16` com `EMPTY = 0` — ⚠️ revisto em 2026-09-26: hoje é **newtype** `TileId(pub(crate) u16)`, e o significado do 0 está **em aberto** (decidir com o registry de tiles; PLANNING §8.10, §2.4)
 - [x] `TileRegistry` (string ↔ u16, interning no I/O) — ⚠️ string table ordenada na exportação (PLANNING §8.8)
 - [ ] `Bounds { origin, size }` + `contains`/`expand`/`iter` em ordem de memória (PLANNING §8.3)
 - [ ] `Layer<T>` genérico com `cells: Box<[T]>` sobre `Bounds`, indexação relativa a `origin` (PLANNING §8.4/§8.5)
 - [ ] `AnyLayer` enum — só variante `Tiles` por enquanto
 - [ ] `Grid` (bounds, layers via `IndexMap<String, AnyLayer>`, seed, acessor tipado)
-- [x] `Context` (grid, rng, registry) — ⚠️ `ChaCha8Rng`, **não** `StdRng` (PLANNING §1.1: `StdRng` não é estável entre versões do crate `rand`)
-- [x] `trait Operator: Send + Sync` com `fn execute(&self, ctx: &mut Context)`
+- [x] `Context` (grid, rng, registry) — ⚠️ `ChaCha8Rng`, **não** `StdRng` (PLANNING §1.1: `StdRng` não é estável entre versões do crate `rand`). ⚠️ Revisto em 2026-09-26 (PLANNING §2.7): `Context` opaco com `ctx.parts()` → `Parts { grid, rng, emit, .. }`; o registry de tiles **não** entra (nomes resolvidos no build); `StepRng` newtype com `rng.at(coord)` + stream (§2.1)
+- [x] `trait Operator: Send + Sync` com `fn execute(&self, ctx: &mut Context)` — ⚠️ revisto em 2026-09-26 (PLANNING §2.7): ganha `fn access(&self) -> Access`, e a fábrica recebe `&mut BuildContext`
 - [x] `OperatorRegistry` + `Dimensions` — falta `Scope::Local|Global` (PLANNING §8.7)
-- [ ] `enum Condition` (LayerIs, LayerNot, LayerEmpty, LayerClear, NearType, NotNearType) + combinadores `Any`/`All`/`Not`
+- [ ] `enum Condition` (LayerIs, LayerNot, LayerEmpty, LayerClear, NearType, NotNearType) + combinadores `Any`/`All`/`Not` — ⚠️ revisto em 2026-09-21/26 (PLANNING §2.6): variantes `TileIs`, `NearType`, `NotNearType`, `AreaIs` (substitui `LayerClear`), `Count` + `Any`/`All`/`Not`; avaliação `prepare`/`test`, compilada em `CompiledCondition` (§2.7)
 - [x] `Pipeline` (build valida tudo de uma vez, run com `on_fail`)
 - [x] `PipelineSpec` v2 + `params`/`$param` + schema via `schemars` — falta `layers` com `kind` (PLANNING §8.8)
 - [x] `OpError`/`PipelineError` com `step_id`
@@ -61,15 +62,17 @@ Estimativa assume familiaridade com Rust; aprendendo a linguagem, contar 2–3×
 - [ ] Perlin 2D (permutation table, fade, lerp, gradient)
 - [ ] `Sampler` trait com `fn sample(&self, x: f64, y: f64) -> f64`
 - [ ] `NoiseConfig` (type, scale) + `fn build(seed) -> Box<dyn Sampler>`
-- [ ] Determinístico por seed (LCG para permutation shuffle)
+- [ ] Determinístico por seed (LCG para permutation shuffle) — ⚠️ revisto em 2026-09-26: LCG seria um segundo RNG fora do contrato; a permutação deriva do `StepRng` (PLANNING §2.1, §2.7)
 
 ### 1.3 Pathfinding (1-2 dias)
 - [ ] `NeighborMode` enum (Four, Eight, Six, TwentySix)
-- [ ] A* com `BinaryHeap`, `FxHashMap` para gScore/parent
+- [ ] A* com `BinaryHeap`, `FxHashMap` para gScore/parent — ⚠️ revisto em 2026-09-26: grid é denso, usar `Vec` indexado por célula em vez de HashMap (PLANNING §2.5)
 - [ ] Heuristic: distância euclidiana
 - [ ] 8 direções 2D (cardinal cost 1.0, diagonal 1.414)
 - [ ] Cost function como `&dyn Fn(Coord) -> f64`
 - [ ] Condition filtering por vizinho
+
+⚠️ Revisto em 2026-09-26: custo e filtro não rodam condition por vizinho (defeito nº 4 do Go) nem passam por `&dyn Fn`: o A* consome `Prepared` ou um **layer de custo derivado**, preparado **uma vez por caminho** (PLANNING §2.6, §2.7).
 - [ ] Path reconstruction via parent chain
 
 ### 1.4 Operators — Terrain (1 dia)
@@ -89,7 +92,7 @@ Estimativa assume familiaridade com Rust; aprendendo a linguagem, contar 2–3×
 ### 1.7 Operators — Paths (2-3 dias)
 - [ ] `PathRepulsion` (layer, tile, distance, factor)
 - [ ] `buildCost` (noise + repulsion → cost closure)
-- [ ] `scanStructureBounds` (flood-fill, bounding boxes)
+- [ ] `scanStructureBounds` (flood-fill, bounding boxes) — ⚠️ revisto em 2026-09-26: flood-fill para redescobrir estrutura é o defeito nº 6 do Go; ler as bboxes de `objects` (PLANNING §2.4)
 - [ ] `entryPointsFrom` (entry point no edge mais próximo)
 - [ ] `PathConnect` (A* direto entre dois pontos)
 - [ ] `ConnectToStructures` (scan + A* para cada estrutura)
@@ -127,7 +130,7 @@ Estimativa assume familiaridade com Rust; aprendendo a linguagem, contar 2–3×
 - [ ] Marcar `Dimensions` corretamente nos genuinamente 2D-only (noise 2D, heightmap)
 
 ### 2.3 Spatial Index
-⚠️ **Movido para a Fase 4 (PLANNING §2.5/§5)**: **distance field** por (layer, tile) — BFS multi-source O(N) cacheado no `Context`, invalidado quando a layer é escrita — resolve `NotNearType`/`NearType`/`LayerClear` com ganho maior e complexidade menor que spatial hash. Spatial hash fica só para 3D esparso, se medição justificar.
+⚠️ **Revisto em 2026-09-26**: o parágrafo abaixo foi superado — as conditions de vizinhança já nascem O(1) por célula na **Fase 1**, via **soma de prefixos no `prepare`** (PLANNING §2.5, §2.6), sem cache no `Context`. Texto anterior, mantido como histórico: ⚠️ **Movido para a Fase 4 (PLANNING §2.5/§5)**: **distance field** por (layer, tile) — BFS multi-source O(N) cacheado no `Context`, invalidado quando a layer é escrita — resolve `NotNearType`/`NearType`/`LayerClear` com ganho maior e complexidade menor que spatial hash. Spatial hash fica só para 3D esparso, se medição justificar.
 
 ### 2.4 Export 3D (1-2 dias)
 - [ ] Sparse format (só células não-vazias)
@@ -161,12 +164,12 @@ Estimativa assume familiaridade com Rust; aprendendo a linguagem, contar 2–3×
 ## Fase 4 — Performance (~2-3 dias)
 
 ### 4.1 Rayon parallelism (2 dias)
-- [ ] Scatter paralelo (partition por região, thread-local RNG derivado de seed+index)
+- [ ] Scatter paralelo (partition por região, thread-local RNG derivado de seed+index) — ⚠️ revisto em 2026-09-26: RNG por thread/índice mudaria o resultado; com `rng.at(coord)` (PLANNING §2.1) o sorteio já é função da posição, e particionar não altera nada
 - [ ] Pathfinding paralelo (múltiplos paths simultâneos em ConnectToStructures/BranchPaths)
 - [ ] Benchmark: single-thread vs rayon em mapas 200×200 e volumes 100³
 
 ### 4.2 Otimizações (1 dia)
-- [ ] `FxHashMap` no A* (rustc-hash, hashing mais rápido)
+- [ ] `FxHashMap` no A* (rustc-hash, hashing mais rápido) — ⚠️ revisto em 2026-09-26: `Vec` por célula desde a Fase 1 (PLANNING §2.5); HashMap só se aparecer caso esparso
 - [ ] Verificar autovectorization no noise sampling (flags SIMD no release build)
 - [ ] Profile com `cargo flamegraph` e otimizar hotspots reais
 
@@ -219,10 +222,10 @@ Detalhes de produto, IA e monetização: PLANNING §6 e §7.
 |---|---|
 | `grid.Cell { Type string, Metadata map[string]any }` | `TileId (u16)` — **metadata por célula removida** (§8.8); `objects`/`markers` cobrem o caso |
 | `grid.Layer { Name, Cells [][]Cell }` | `Layer<T> { bounds: Bounds, cells: Box<[T]> }` dentro de `AnyLayer::Tiles` |
-| `grid.Grid2D { Width, Height, Seed, Layers, LayerOrder }` | `Grid { bounds: Bounds, layers: IndexMap<String, AnyLayer>, seed }` |
-| `pipeline.Context { Grid, RNG }` | `Context { grid, tiles: TileRegistry, rng: ChaCha8Rng }` — rng **derivado por step** (§2.1) |
+| `grid.Grid2D { Width, Height, Seed, Layers, LayerOrder }` | `Grid { bounds: Bounds, layers: IndexMap<String, AnyLayer>, seed }` — ⚠️ caminho quente por `LayerId` (PLANNING §2.7) |
+| `pipeline.Context { Grid, RNG }` | `Context { grid, tiles: TileRegistry, rng: ChaCha8Rng }` — rng **derivado por step** (§2.1). ⚠️ Revisto em 2026-09-26 (PLANNING §2.7): `Context` opaco com `parts()`; sem `TileRegistry` (resolvido no build); `StepRng` newtype |
 | `pipeline.Operator (interface)` | `trait Operator: Send + Sync` |
-| `pipeline.Condition (structs com switch)` | `enum Condition` |
+| `pipeline.Condition (structs com switch)` | `enum Condition` — ⚠️ variantes e avaliação `prepare`/`test` na PLANNING §2.6/§2.7 |
 | `noise.Perlin { perm [512]int }` | `Perlin { perm: [u8; 512] }` |
 | `pathfinding.Point { X, Y }` | `Coord { x: i32, y: i32, z: i32 }` |
 
