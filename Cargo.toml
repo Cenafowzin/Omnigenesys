@@ -8,3 +8,6 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["Rodrigo Dubeux <digodubeux@gmail.com>"]
 repository = "https://github.com/Cenafowzin/Omnigenesys"
+
+[profile.release]
+codegen-units = 1

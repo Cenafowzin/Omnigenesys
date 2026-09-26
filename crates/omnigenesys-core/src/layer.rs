@@ -45,6 +45,7 @@ impl<T: Clone> Layer<T> {
 }
 
 impl<T> Layer<T> {
+    #[inline]
     fn index(&self, c: Coord) -> Option<usize> {
         if self.bounds.contains(c) {
             let local = c - self.bounds.origin;
@@ -61,10 +62,12 @@ impl<T> Layer<T> {
         self.bounds
     }
 
+    #[inline]
     pub fn get(&self, c: Coord) -> Option<&T> {
         self.index(c).map(|i| &self.cells[i])
     }
 
+    #[inline]
     pub fn set(&mut self, c: Coord, value: T) -> Result<(), OutOfBounds> {
         let i = self.index(c).ok_or(OutOfBounds {
             coord: c,
@@ -83,29 +86,51 @@ impl<T> Layer<T> {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Coord, &T)> {
-        self.bounds.iter().zip(self.cells.iter())
+        let Bounds { origin, size } = self.bounds;
+        self.cells
+            .chunks_exact((size.height as usize * size.width as usize).max(1))
+            .enumerate()
+            .flat_map(move |(z, plane)| {
+                plane
+                    .chunks_exact((size.width as usize).max(1))
+                    .enumerate()
+                    .flat_map(move |(y, row)| {
+                        row.iter().enumerate().map(move |(x, cell)| {
+                            let coord = Coord::new(
+                                origin.x + x as i32,
+                                origin.y + y as i32,
+                                origin.z + z as i32,
+                            );
+                            (coord, cell)
+                        })
+                    })
+            })
     }
 }
 
 impl AnyLayer {
+    #[inline]
     pub fn kind(&self) -> LayerKind {
         match self {
             AnyLayer::Tiles(_) => LayerKind::Tiles,
         }
     }
 
+    #[inline]
     pub fn bounds(&self) -> Bounds {
         match self {
             AnyLayer::Tiles(layer) => layer.bounds(),
         }
     }
 
+    #[inline]
     pub fn as_tiles(&self) -> Option<&Layer<TileId>> {
         match self {
             AnyLayer::Tiles(layer) => Some(layer),
         }
     }
 
+    #[inline]
     pub fn as_tiles_mut(&mut self) -> Option<&mut Layer<TileId>> {
         match self {
             AnyLayer::Tiles(layer) => Some(layer),

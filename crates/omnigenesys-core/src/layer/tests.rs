@@ -268,3 +268,13 @@ fn layer_errors_are_std_errors() {
     ];
     assert_eq!(errors.len(), 2);
 }
+
+#[test]
+fn iter_of_layer_with_zero_height_or_depth_yields_nothing() {
+    // Zero width is covered above; with width > 0 the plane/row chunk sizes are
+    // non-zero, so this checks the other two axes collapse to no cells.
+    for size in [GridSize::new(4, 0, 2), GridSize::new(4, 3, 0)] {
+        let layer = Layer::new(Bounds::new(Coord::new(10, 20, 5), size), 0u16).unwrap();
+        assert_eq!(layer.iter().count(), 0, "size {size:?}");
+    }
+}

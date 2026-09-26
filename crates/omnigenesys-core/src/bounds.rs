@@ -9,10 +9,12 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    #[inline]
     pub const fn new(origin: Coord, size: GridSize) -> Bounds {
         Bounds { origin, size }
     }
 
+    #[inline]
     pub fn contains(&self, c: Coord) -> bool {
         let lx = c.x as i64 - self.origin.x as i64;
         let ly = c.y as i64 - self.origin.y as i64;
@@ -25,6 +27,7 @@ impl Bounds {
             && lz < self.size.depth as i64
     }
 
+    #[inline]
     #[must_use = "expand returns a new Bounds; it does not modify self"]
     pub fn expand(self, x: u32, y: u32, z: u32) -> Bounds {
         debug_assert!(x <= i32::MAX as u32, "padding must fit in i32");
