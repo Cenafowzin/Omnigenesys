@@ -1,4 +1,5 @@
 use crate::bounds::Bounds;
+use crate::coords::GridSize;
 use crate::layer::{AnyLayer, Layer, LayerKind};
 use crate::tile::TileId;
 use indexmap::IndexMap;
@@ -21,6 +22,10 @@ pub enum GridError {
         expected: LayerKind,
         found: LayerKind,
     },
+    LayerTooLarge {
+        name: String,
+        size: GridSize,
+    },
 }
 
 impl Grid {
@@ -41,7 +46,14 @@ impl Grid {
             return Err(GridError::DuplicateLayer { name });
         }
         let layer = match kind {
-            LayerKind::Tiles => AnyLayer::Tiles(Layer::new(self.bounds, TileId(0))),
+            LayerKind::Tiles => {
+                let tiles =
+                    Layer::new(self.bounds, TileId(0)).map_err(|e| GridError::LayerTooLarge {
+                        name: name.clone(),
+                        size: e.size,
+                    })?;
+                AnyLayer::Tiles(tiles)
+            }
         };
         self.layers.insert(name, layer);
         Ok(())

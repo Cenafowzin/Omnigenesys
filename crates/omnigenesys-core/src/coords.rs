@@ -63,8 +63,14 @@ impl GridSize {
         }
     }
 
-    pub const fn len(&self) -> usize {
-        self.width as usize * self.height as usize * self.depth as usize
+    pub fn checked_len(&self) -> Option<usize> {
+        (self.width as usize)
+            .checked_mul(self.height as usize)?
+            .checked_mul(self.depth as usize)
+    }
+
+    pub fn len(&self) -> usize {
+        self.checked_len().expect("grid size overflows usize")
     }
 
     pub const fn is_empty(&self) -> bool {

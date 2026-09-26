@@ -158,3 +158,30 @@ fn bounds_rejects_unknown_field() {
     let result: Result<Bounds, _> = serde_json::from_str(json);
     assert!(result.is_err());
 }
+
+// overflow
+
+#[test]
+fn contains_does_not_wrap_around_with_extreme_coords() {
+    // In i32, i32::MIN - (i32::MAX - 5) wraps to 6, which is inside a width of
+    // 10: the old implementation answered true for a cell on the other side of
+    // the world.
+    let b = Bounds::new(Coord::new(i32::MAX - 5, 0, 0), GridSize::new(10, 1, 1));
+    assert!(!b.contains(Coord::new(i32::MIN, 0, 0)));
+    assert!(b.contains(Coord::new(i32::MAX, 0, 0)));
+}
+
+#[test]
+fn contains_handles_width_above_i32_max() {
+    // `u32::MAX as i32` is -1, so the old check `local.x < width as i32`
+    // rejected every cell.
+    let b = Bounds::new(Coord::ZERO, GridSize::new(u32::MAX, 1, 1));
+    assert!(b.contains(Coord::new(i32::MAX, 0, 0)));
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "padding must fit in i32")]
+fn expand_rejects_padding_above_i32_max_in_debug() {
+    let _ = sample().expand(u32::MAX, 0, 0);
+}

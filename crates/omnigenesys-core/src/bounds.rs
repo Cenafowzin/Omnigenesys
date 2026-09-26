@@ -14,16 +14,22 @@ impl Bounds {
     }
 
     pub fn contains(&self, c: Coord) -> bool {
-        let local = c - self.origin;
-        0 <= local.x
-            && local.x < self.size.width as i32
-            && 0 <= local.y
-            && local.y < self.size.height as i32
-            && 0 <= local.z
-            && local.z < self.size.depth as i32
+        let lx = c.x as i64 - self.origin.x as i64;
+        let ly = c.y as i64 - self.origin.y as i64;
+        let lz = c.z as i64 - self.origin.z as i64;
+        0 <= lx
+            && lx < self.size.width as i64
+            && 0 <= ly
+            && ly < self.size.height as i64
+            && 0 <= lz
+            && lz < self.size.depth as i64
     }
 
+    #[must_use = "expand returns a new Bounds; it does not modify self"]
     pub fn expand(self, x: u32, y: u32, z: u32) -> Bounds {
+        debug_assert!(x <= i32::MAX as u32, "padding must fit in i32");
+        debug_assert!(y <= i32::MAX as u32, "padding must fit in i32");
+        debug_assert!(z <= i32::MAX as u32, "padding must fit in i32");
         Bounds {
             origin: Coord {
                 x: self.origin.x - x as i32,

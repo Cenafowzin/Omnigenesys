@@ -129,3 +129,18 @@ fn layers_are_independent() {
         .unwrap();
     assert_eq!(grid.tiles("vegetation").unwrap().get(c), Some(&TileId(0)));
 }
+
+#[test]
+fn add_layer_reports_a_layer_too_large_and_adds_nothing() {
+    let size = GridSize::new(u32::MAX, u32::MAX, u32::MAX);
+    let mut grid = Grid::new(Bounds::new(Coord::ZERO, size));
+    let err = grid.add_layer("terrain", LayerKind::Tiles).unwrap_err();
+    assert_eq!(
+        err,
+        GridError::LayerTooLarge {
+            name: "terrain".to_string(),
+            size,
+        }
+    );
+    assert_eq!(grid.names().count(), 0);
+}

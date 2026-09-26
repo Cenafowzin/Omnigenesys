@@ -10,13 +10,13 @@ fn sample_bounds() -> Bounds {
 
 #[test]
 fn new_allocates_one_cell_per_bounds_cell() {
-    let layer = Layer::new(sample_bounds(), 0u16);
+    let layer = Layer::new(sample_bounds(), 0u16).unwrap();
     assert_eq!(layer.cells.len(), sample_bounds().size.len());
 }
 
 #[test]
 fn new_fills_every_cell_with_the_given_value() {
-    let layer = Layer::new(sample_bounds(), 7u16);
+    let layer = Layer::new(sample_bounds(), 7u16).unwrap();
     for c in sample_bounds().iter() {
         assert_eq!(layer.get(c), Some(&7), "cell {c:?}");
     }
@@ -24,7 +24,7 @@ fn new_fills_every_cell_with_the_given_value() {
 
 #[test]
 fn bounds_returns_the_creation_bounds() {
-    let layer = Layer::new(sample_bounds(), 0u16);
+    let layer = Layer::new(sample_bounds(), 0u16).unwrap();
     assert_eq!(layer.bounds(), sample_bounds());
 }
 
@@ -32,7 +32,7 @@ fn bounds_returns_the_creation_bounds() {
 
 #[test]
 fn index_follows_bounds_iter_order() {
-    let layer = Layer::new(sample_bounds(), 0u16);
+    let layer = Layer::new(sample_bounds(), 0u16).unwrap();
     for (expected, c) in sample_bounds().iter().enumerate() {
         assert_eq!(layer.index(c), Some(expected), "cell {c:?}");
     }
@@ -41,13 +41,13 @@ fn index_follows_bounds_iter_order() {
 #[test]
 fn index_matches_hand_computed_value() {
     // local (1, 1, 1) -> x + width * (y + height * z) = 1 + 4 * (1 + 3 * 1) = 17
-    let layer = Layer::new(sample_bounds(), 0u16);
+    let layer = Layer::new(sample_bounds(), 0u16).unwrap();
     assert_eq!(layer.index(Coord::new(11, 21, 6)), Some(17));
 }
 
 #[test]
 fn index_outside_bounds_is_none() {
-    let layer = Layer::new(sample_bounds(), 0u16);
+    let layer = Layer::new(sample_bounds(), 0u16).unwrap();
     // Below the origin the local coord is negative; casting it to usize
     // before the bounds check would produce a huge index instead of None.
     assert_eq!(layer.index(Coord::new(9, 20, 5)), None);
@@ -59,13 +59,13 @@ fn index_outside_bounds_is_none() {
 
 #[test]
 fn get_outside_bounds_is_none() {
-    let layer = Layer::new(sample_bounds(), 0u16);
+    let layer = Layer::new(sample_bounds(), 0u16).unwrap();
     assert_eq!(layer.get(Coord::new(9, 20, 5)), None);
 }
 
 #[test]
 fn set_then_get_returns_the_new_value() {
-    let mut layer = Layer::new(sample_bounds(), 0u16);
+    let mut layer = Layer::new(sample_bounds(), 0u16).unwrap();
     let c = Coord::new(12, 21, 6);
     layer.set(c, 9).unwrap();
     assert_eq!(layer.get(c), Some(&9));
@@ -73,7 +73,7 @@ fn set_then_get_returns_the_new_value() {
 
 #[test]
 fn set_changes_only_the_target_cell() {
-    let mut layer = Layer::new(sample_bounds(), 0u16);
+    let mut layer = Layer::new(sample_bounds(), 0u16).unwrap();
     let target = Coord::new(12, 21, 6);
     layer.set(target, 9).unwrap();
     for c in sample_bounds().iter() {
@@ -84,7 +84,7 @@ fn set_changes_only_the_target_cell() {
 
 #[test]
 fn set_outside_bounds_returns_out_of_bounds() {
-    let mut layer = Layer::new(sample_bounds(), 0u16);
+    let mut layer = Layer::new(sample_bounds(), 0u16).unwrap();
     let outside = Coord::new(14, 21, 6);
     let expected = OutOfBounds {
         coord: outside,
@@ -95,7 +95,7 @@ fn set_outside_bounds_returns_out_of_bounds() {
 
 #[test]
 fn failed_set_leaves_layer_unchanged() {
-    let mut layer = Layer::new(sample_bounds(), 0u16);
+    let mut layer = Layer::new(sample_bounds(), 0u16).unwrap();
     let before = layer.clone();
     assert!(layer.set(Coord::new(14, 21, 6), 9).is_err());
     assert_eq!(layer, before);
@@ -106,7 +106,7 @@ fn failed_set_leaves_layer_unchanged() {
 #[test]
 fn empty_layer_has_no_cells_and_rejects_access() {
     let bounds = Bounds::new(Coord::new(10, 20, 5), GridSize::new(0, 3, 2));
-    let mut layer = Layer::new(bounds, 0u16);
+    let mut layer = Layer::new(bounds, 0u16).unwrap();
     assert!(layer.cells.is_empty());
     assert_eq!(layer.get(bounds.origin), None);
     assert!(layer.set(bounds.origin, 9).is_err());
@@ -114,7 +114,7 @@ fn empty_layer_has_no_cells_and_rejects_access() {
 
 #[test]
 fn layer_works_with_non_copy_elements() {
-    let mut layer = Layer::new(sample_bounds(), String::from("floor"));
+    let mut layer = Layer::new(sample_bounds(), String::from("floor")).unwrap();
     let origin = sample_bounds().origin;
     let c = Coord::new(12, 21, 6);
     layer.set(c, String::from("wall")).unwrap();
@@ -125,7 +125,7 @@ fn layer_works_with_non_copy_elements() {
 // AnyLayer
 
 fn sample_tiles_layer() -> Layer<TileId> {
-    Layer::new(sample_bounds(), TileId(0))
+    Layer::new(sample_bounds(), TileId(0)).unwrap()
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn as_tiles_mut_writes_through_the_enum() {
 
 /// Gives every cell a different value, so a shifted pairing cannot pass.
 fn layer_numbered_in_bounds_order() -> Layer<u16> {
-    let mut layer = Layer::new(sample_bounds(), 0u16);
+    let mut layer = Layer::new(sample_bounds(), 0u16).unwrap();
     for (i, c) in sample_bounds().iter().enumerate() {
         layer.set(c, i as u16).unwrap();
     }
@@ -180,7 +180,7 @@ fn cells_yields_one_value_per_cell_in_memory_order() {
 
 #[test]
 fn cells_mut_writes_every_cell() {
-    let mut layer = Layer::new(sample_bounds(), 0u16);
+    let mut layer = Layer::new(sample_bounds(), 0u16).unwrap();
     for cell in layer.cells_mut() {
         *cell = 5;
     }
@@ -191,7 +191,7 @@ fn cells_mut_writes_every_cell() {
 
 #[test]
 fn iter_visits_every_coord_in_bounds_order() {
-    let layer = Layer::new(sample_bounds(), 0u16);
+    let layer = Layer::new(sample_bounds(), 0u16).unwrap();
     let coords: Vec<Coord> = layer.iter().map(|(c, _)| c).collect();
     let expected: Vec<Coord> = sample_bounds().iter().collect();
     assert_eq!(coords, expected);
@@ -208,7 +208,17 @@ fn iter_pairs_each_coord_with_the_value_get_returns() {
 #[test]
 fn empty_layer_yields_no_cells_and_no_pairs() {
     let bounds = Bounds::new(Coord::new(10, 20, 5), GridSize::new(0, 3, 2));
-    let layer = Layer::new(bounds, 0u16);
+    let layer = Layer::new(bounds, 0u16).unwrap();
     assert_eq!(layer.cells().count(), 0);
     assert_eq!(layer.iter().count(), 0);
+}
+
+// size validation
+
+#[test]
+fn new_rejects_a_size_that_overflows_usize() {
+    let size = GridSize::new(u32::MAX, u32::MAX, u32::MAX);
+    let bounds = Bounds::new(Coord::ZERO, size);
+    // Must fail before trying to allocate anything.
+    assert_eq!(Layer::new(bounds, 0u16), Err(TooLarge { size }));
 }

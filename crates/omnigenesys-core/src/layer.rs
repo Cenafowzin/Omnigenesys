@@ -1,5 +1,5 @@
 use crate::bounds::Bounds;
-use crate::coords::Coord;
+use crate::coords::{Coord, GridSize};
 use crate::tile::TileId;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,10 +25,19 @@ pub struct OutOfBounds {
     pub bounds: Bounds,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TooLarge {
+    pub size: GridSize,
+}
+
 impl<T: Clone> Layer<T> {
-    pub fn new(bounds: Bounds, fill: T) -> Layer<T> {
-        let cells = vec![fill; bounds.size.len()].into_boxed_slice();
-        Layer { bounds, cells }
+    pub fn new(bounds: Bounds, fill: T) -> Result<Layer<T>, TooLarge> {
+        let cell_count = bounds
+            .size
+            .checked_len()
+            .ok_or(TooLarge { size: bounds.size })?;
+        let cells = vec![fill; cell_count].into_boxed_slice();
+        Ok(Layer { bounds, cells })
     }
 }
 

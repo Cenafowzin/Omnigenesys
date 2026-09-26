@@ -13,6 +13,9 @@ fn len_counts_all_cells_in_3d_grid() {
     assert_eq!(size.len(), 24);
 }
 
+// 2048³ does not fit in a 32-bit usize (WASM); there `len()` must panic
+// instead, which `len_panics_when_size_overflows_usize` covers.
+#[cfg(target_pointer_width = "64")]
 #[test]
 fn len_does_not_overflow_for_large_grid() {
     let size = GridSize::new(2048, 2048, 2048);
@@ -115,4 +118,25 @@ fn coord_serde_roundtrip() {
     let json = serde_json::to_string(&c).unwrap();
     let c2: Coord = serde_json::from_str(&json).unwrap();
     assert_eq!(c, c2);
+}
+
+// checked_len
+
+#[test]
+fn checked_len_matches_len_for_a_normal_grid() {
+    let size = GridSize::new(80, 50, 3);
+    assert_eq!(size.checked_len(), Some(12_000));
+}
+
+#[test]
+fn checked_len_is_none_when_size_overflows_usize() {
+    // u32::MAX³ ≈ 7.9e28 does not fit even in a 64-bit usize (max ≈ 1.8e19).
+    let size = GridSize::new(u32::MAX, u32::MAX, u32::MAX);
+    assert_eq!(size.checked_len(), None);
+}
+
+#[test]
+#[should_panic(expected = "grid size overflows usize")]
+fn len_panics_when_size_overflows_usize() {
+    let _ = GridSize::new(u32::MAX, u32::MAX, u32::MAX).len();
 }
