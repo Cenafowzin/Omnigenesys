@@ -185,3 +185,16 @@ fn contains_handles_width_above_i32_max() {
 fn expand_rejects_padding_above_i32_max_in_debug() {
     let _ = sample().expand(u32::MAX, 0, 0);
 }
+
+// hash
+
+#[test]
+fn equal_bounds_hash_to_the_same_key() {
+    // Bounds will key the chunk cache (Part 2).
+    use std::collections::HashSet;
+    let mut set = HashSet::new();
+    set.insert(sample());
+    set.insert(sample());
+    set.insert(sample().expand(1, 0, 0));
+    assert_eq!(set.len(), 2);
+}

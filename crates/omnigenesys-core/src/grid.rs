@@ -3,29 +3,28 @@ use crate::coords::GridSize;
 use crate::layer::{AnyLayer, Layer, LayerKind};
 use crate::tile::TileId;
 use indexmap::IndexMap;
+use thiserror::Error;
 
+#[derive(Debug)]
 pub struct Grid {
     bounds: Bounds,
     layers: IndexMap<String, AnyLayer>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum GridError {
-    LayerNotFound {
-        name: String,
-    },
-    DuplicateLayer {
-        name: String,
-    },
+    #[error("layer '{name}' not found")]
+    LayerNotFound { name: String },
+    #[error("layer '{name}' already exists")]
+    DuplicateLayer { name: String },
+    #[error("layer '{name}' is {found}, expected {expected}")]
     WrongLayerKind {
         name: String,
         expected: LayerKind,
         found: LayerKind,
     },
-    LayerTooLarge {
-        name: String,
-        size: GridSize,
-    },
+    #[error("layer '{name}' is too large: {size:?}")]
+    LayerTooLarge { name: String, size: GridSize },
 }
 
 impl Grid {

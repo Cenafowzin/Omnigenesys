@@ -1,7 +1,7 @@
 use crate::coords::{Coord, GridSize};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Hash)]
 #[serde(deny_unknown_fields)]
 pub struct Bounds {
     pub origin: Coord,

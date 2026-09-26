@@ -222,3 +222,49 @@ fn new_rejects_a_size_that_overflows_usize() {
     // Must fail before trying to allocate anything.
     assert_eq!(Layer::new(bounds, 0u16), Err(TooLarge { size }));
 }
+
+// error messages
+//
+// Messages that embed a Debug-formatted value are checked with `contains`:
+// the exact Debug layout of a derive is not a stability promise.
+
+#[test]
+fn out_of_bounds_message_names_the_coord() {
+    let err = OutOfBounds {
+        coord: Coord::new(14, 21, 6),
+        bounds: sample_bounds(),
+    };
+    let msg = err.to_string();
+    assert!(msg.starts_with("coord "), "{msg}");
+    assert!(msg.contains("is outside bounds"), "{msg}");
+    assert!(msg.contains("x: 14"), "{msg}");
+}
+
+#[test]
+fn too_large_message_explains_the_problem() {
+    let err = TooLarge {
+        size: GridSize::new(u32::MAX, u32::MAX, u32::MAX),
+    };
+    assert!(err.to_string().contains("has too many cells to index"));
+}
+
+#[test]
+fn layer_kind_displays_the_json_name() {
+    // Same word the pipeline JSON uses in `kind` (PLANNING 8.8.1).
+    assert_eq!(LayerKind::Tiles.to_string(), "tiles");
+}
+
+#[test]
+fn layer_errors_are_std_errors() {
+    // Compiles only if both implement std::error::Error.
+    let errors: Vec<Box<dyn std::error::Error>> = vec![
+        Box::new(OutOfBounds {
+            coord: Coord::ZERO,
+            bounds: sample_bounds(),
+        }),
+        Box::new(TooLarge {
+            size: GridSize::new(1, 1, 1),
+        }),
+    ];
+    assert_eq!(errors.len(), 2);
+}

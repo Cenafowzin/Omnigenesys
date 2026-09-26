@@ -1,6 +1,7 @@
 use crate::bounds::Bounds;
 use crate::coords::{Coord, GridSize};
 use crate::tile::TileId;
+use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer<T> {
@@ -19,13 +20,15 @@ pub enum LayerKind {
     Tiles,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("coord {coord:?} is outside bounds {bounds:?}")]
 pub struct OutOfBounds {
     pub coord: Coord,
     pub bounds: Bounds,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("grid size {size:?} has too many cells to index")]
 pub struct TooLarge {
     pub size: GridSize,
 }
@@ -106,6 +109,14 @@ impl AnyLayer {
     pub fn as_tiles_mut(&mut self) -> Option<&mut Layer<TileId>> {
         match self {
             AnyLayer::Tiles(layer) => Some(layer),
+        }
+    }
+}
+
+impl std::fmt::Display for LayerKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LayerKind::Tiles => write!(f, "tiles"),
         }
     }
 }

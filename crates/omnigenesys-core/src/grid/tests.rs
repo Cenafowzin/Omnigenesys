@@ -144,3 +144,63 @@ fn add_layer_reports_a_layer_too_large_and_adds_nothing() {
     );
     assert_eq!(grid.names().count(), 0);
 }
+
+// error messages
+
+#[test]
+fn grid_error_messages() {
+    let cases = [
+        (
+            GridError::LayerNotFound {
+                name: "terrain".to_string(),
+            },
+            "layer 'terrain' not found",
+        ),
+        (
+            GridError::DuplicateLayer {
+                name: "terrain".to_string(),
+            },
+            "layer 'terrain' already exists",
+        ),
+        (
+            // Unreachable through the API while AnyLayer has one variant,
+            // but the message is already part of the contract.
+            GridError::WrongLayerKind {
+                name: "terrain".to_string(),
+                expected: LayerKind::Tiles,
+                found: LayerKind::Tiles,
+            },
+            "layer 'terrain' is tiles, expected tiles",
+        ),
+    ];
+    for (err, expected) in cases {
+        assert_eq!(err.to_string(), expected);
+    }
+}
+
+#[test]
+fn layer_too_large_message_names_the_layer() {
+    let err = GridError::LayerTooLarge {
+        name: "terrain".to_string(),
+        size: GridSize::new(u32::MAX, 1, 1),
+    };
+    assert!(
+        err.to_string()
+            .starts_with("layer 'terrain' is too large: ")
+    );
+}
+
+#[test]
+fn grid_error_is_a_std_error() {
+    let err: Box<dyn std::error::Error> = Box::new(GridError::LayerNotFound {
+        name: "terrain".to_string(),
+    });
+    assert_eq!(err.to_string(), "layer 'terrain' not found");
+}
+
+#[test]
+fn grid_debug_lists_its_layers() {
+    let mut grid = sample_grid();
+    grid.add_layer("terrain", LayerKind::Tiles).unwrap();
+    assert!(format!("{grid:?}").contains("terrain"));
+}
