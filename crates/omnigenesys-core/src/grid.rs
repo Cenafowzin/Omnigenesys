@@ -46,11 +46,12 @@ impl Grid {
         }
         let layer = match kind {
             LayerKind::Tiles => {
-                let tiles =
-                    Layer::new(self.bounds, TileId(0)).map_err(|e| GridError::LayerTooLarge {
+                let tiles = Layer::new(self.bounds, TileId::EMPTY).map_err(|e| {
+                    GridError::LayerTooLarge {
                         name: name.clone(),
                         size: e.size,
-                    })?;
+                    }
+                })?;
                 AnyLayer::Tiles(tiles)
             }
         };
