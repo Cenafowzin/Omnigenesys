@@ -4,6 +4,7 @@
 //! `Coord` → `Bounds` → `Layer<T>` → `AnyLayer` → `Grid` → iterator on `Layer`.
 //! Declare each module here as it is written.
 pub mod bounds;
+pub mod condition;
 pub mod coords;
 pub mod grid;
 pub mod layer;
