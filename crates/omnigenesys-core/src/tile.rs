@@ -1,7 +1,7 @@
 use indexmap::IndexSet;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TileId(pub(crate) u16);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
