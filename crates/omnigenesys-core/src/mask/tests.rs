@@ -187,3 +187,35 @@ fn iter_ones_crosses_word_boundaries() {
         .collect();
     assert_eq!(mask_of(b, &on).iter_ones().collect::<Vec<_>>(), on);
 }
+
+#[test]
+fn iter_ones_matches_a_scan_on_any_shape_and_density() {
+    // Reference: every cell of the bounds, in order, filtered by `get`. Covers
+    // jumps over several rows and planes (sparse), every cell (full), and the
+    // odd shapes where a row is a single cell or a single word spans planes.
+    let shapes = [
+        GridSize::new(5, 3, 4),
+        GridSize::new(1, 7, 3),
+        GridSize::new(70, 1, 2),
+        GridSize::new(3, 1, 1),
+    ];
+    let mut seed = 0x2545_F491_4F6C_DD1Du64;
+    for size in shapes {
+        let b = Bounds::new(Coord::new(-4, 9, -2), size);
+        // 1 in 40 (sparse), 1 in 2, and every cell.
+        for keep_one_in in [40, 2, 1] {
+            let on: Vec<Coord> = b
+                .iter()
+                .filter(|_| {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 7;
+                    seed ^= seed << 17;
+                    seed.is_multiple_of(keep_one_in)
+                })
+                .collect();
+            let mask = mask_of(b, &on);
+            let got: Vec<Coord> = mask.iter_ones().collect();
+            assert_eq!(got, on, "size {size:?}, 1 in {keep_one_in}");
+        }
+    }
+}

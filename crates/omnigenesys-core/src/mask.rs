@@ -64,30 +64,15 @@ impl CellMask {
     }
 
     /// The true cells, in z → y → x order.
-    pub fn iter_ones(&self) -> impl Iterator<Item = Coord> + '_ {
-        let Bounds { origin, size } = self.bounds;
-        let (w, h) = (size.width as usize, size.height as usize);
-        self.words
-            .iter()
-            .enumerate()
-            .flat_map(|(k, &word)| {
-                let mut word = word;
-                std::iter::from_fn(move || {
-                    if word == 0 {
-                        return None;
-                    }
-                    let i = k * 64 + word.trailing_zeros() as usize;
-                    word &= word - 1;
-                    Some(i)
-                })
-            })
-            .map(move |i| {
-                Coord::new(
-                    origin.x + (i % w) as i32,
-                    origin.y + (i / w % h) as i32,
-                    origin.z + (i / (w * h)) as i32,
-                )
-            })
+    pub fn iter_ones(&self) -> IterOnes<'_> {
+        IterOnes {
+            words: &self.words,
+            next_word: 0,
+            word: 0,
+            index: 0,
+            local: [0; 3],
+            bounds: self.bounds,
+        }
     }
 
     fn clear_tail(&mut self) {
@@ -95,6 +80,60 @@ impl CellMask {
         if let (Some(last), true) = (self.words.last_mut(), tail != 0) {
             *last &= (1 << tail) - 1;
         }
+    }
+}
+
+/// Iterator over the true cells of a [`CellMask`], from [`CellMask::iter_ones`].
+///
+/// Set bits come in increasing index order, so the coordinate is advanced by
+/// the distance from the previous one instead of being divided out of the
+/// index: three divisions per cell made iteration the bottleneck of a scatter.
+pub struct IterOnes<'a> {
+    words: &'a [u64],
+    next_word: usize,
+    /// Bits of the current word not yielded yet.
+    word: u64,
+    /// Index of the last cell yielded (0 before the first).
+    index: usize,
+    /// Local (x, y, z) of `index`.
+    local: [u32; 3],
+    bounds: Bounds,
+}
+
+impl Iterator for IterOnes<'_> {
+    type Item = Coord;
+
+    #[inline]
+    fn next(&mut self) -> Option<Coord> {
+        while self.word == 0 {
+            self.word = *self.words.get(self.next_word)?;
+            self.next_word += 1;
+        }
+        let i = (self.next_word - 1) * 64 + self.word.trailing_zeros() as usize;
+        self.word &= self.word - 1;
+
+        // Walk from the previous cell: whole rows are skipped one at a time,
+        // so over the whole iteration this costs at most one step per row.
+        let size = self.bounds.size;
+        let [x, y, z] = &mut self.local;
+        let mut x_far = *x as usize + (i - self.index);
+        self.index = i;
+        while x_far >= size.width as usize {
+            x_far -= size.width as usize;
+            *y += 1;
+            if *y == size.height {
+                *y = 0;
+                *z += 1;
+            }
+        }
+        *x = x_far as u32;
+
+        let o = self.bounds.origin;
+        Some(Coord::new(
+            o.x + *x as i32,
+            o.y + *y as i32,
+            o.z + *z as i32,
+        ))
     }
 }
 
