@@ -716,17 +716,17 @@ fn naive_count(layer: &Layer<TileId>, tiles: &[TileId], c: Coord, r: Radius) -> 
 
 #[test]
 fn prefix_sums_entry_counts_the_box_below_it() {
-    // Every cell matches, so entry (x, y, z) must be exactly x * y * z,
-    // including the zero planes at x = 0, y = 0 and z = 0.
+    // Every cell matches, so entry (x, y, z) must be exactly x * y * (z + 1):
+    // x and y have a zero border at 0, z has no border (plane z covers 0..=z).
     let bounds = Bounds::new(Coord::new(-3, 7, 2), GridSize::new(3, 2, 2));
     let layer = Layer::new(bounds, TileId(1)).unwrap();
     let s = PrefixSums::from_layer(&layer, &TileSet::new(&[TileId(1)])).unwrap();
-    assert_eq!((s.sw, s.sh, s.sums.len()), (4, 3, 4 * 3 * 3));
-    for z in 0..3 {
+    assert_eq!((s.sw, s.sh, s.sums.len()), (4, 3, 4 * 3 * 2));
+    for z in 0..2 {
         for y in 0..3 {
             for x in 0..4 {
                 let entry = s.sums[x + 4 * (y + 3 * z)];
-                assert_eq!(entry, (x * y * z) as u32, "entry ({x}, {y}, {z})");
+                assert_eq!(entry, (x * y * (z + 1)) as u32, "entry ({x}, {y}, {z})");
             }
         }
     }

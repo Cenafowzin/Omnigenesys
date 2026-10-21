@@ -133,9 +133,10 @@ pub enum ConditionError {
     TooManyCellsToCount { cells: usize },
 }
 
-/// Entry `(x, y, z)` counts the matches in the local box `[0, x) × [0, y) × [0, z)`.
-/// The table is one entry larger per axis; its zero plane at 0 lets a query
-/// read any box without branching on the edges.
+/// Entry `(x, y, z)` counts the matches in the local box `[0, x) × [0, y) × [0, z]`.
+/// x and y have a zero border (one entry larger), so a query never branches
+/// on them. z has none: a 2D map would pay a whole zero plane for it, which
+/// doubled the build time (measured 2026-10-21); queries test `z0 == 0`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PrefixSums {
     bounds: Bounds,
@@ -164,32 +165,31 @@ impl PrefixSums {
         }
         let sw = bounds.size.width as usize + 1;
         let sh = bounds.size.height as usize + 1;
-        let sd = bounds.size.depth as usize + 1;
+        let plane = sw * sh;
         // Can overflow usize on 32-bit targets (WASM).
-        let len = sw
-            .checked_mul(sh)
-            .and_then(|n| n.checked_mul(sd))
+        let len = plane
+            .checked_mul(bounds.size.depth as usize)
             .ok_or(too_many)?;
         let mut sums: Box<[u32]> = vec![0u32; len].into_boxed_slice();
 
-        // Pass x, fused with marking the cells.
+        // Passes x and y in one sweep: an entry is the entry above it plus
+        // the running count of its own row.
         let mut cells = layer.cells();
-        for z in 1..sd {
+        for p in sums.chunks_exact_mut(plane) {
             for y in 1..sh {
-                let row = &mut sums[sw * (y + sh * z)..][..sw];
+                let (above, row) = p[(y - 1) * sw..][..2 * sw].split_at_mut(sw);
                 let mut run = 0;
-                // The row goes first in the zip: when it ends, the next
+                // The cells go last in the zip: when the row ends, the next
                 // row's first cell is not consumed.
-                for (entry, cell) in row[1..].iter_mut().zip(cells.by_ref()) {
+                for ((entry, above), cell) in
+                    row[1..].iter_mut().zip(&above[1..]).zip(cells.by_ref())
+                {
                     run += u32::from(tiles.contains(*cell));
-                    *entry = run;
+                    *entry = above + run;
                 }
             }
         }
-        for plane in sums.chunks_exact_mut(sw * sh) {
-            accumulate_blocks(plane, sw);
-        }
-        accumulate_blocks(&mut sums, sw * sh);
+        accumulate_blocks(&mut sums, plane);
 
         Ok(PrefixSums {
             bounds,
@@ -210,21 +210,22 @@ impl PrefixSums {
             return 0;
         };
         let p = |x: usize, y: usize, z: usize| self.sums[x + self.sw * (y + self.sh * z)];
-        // Partial results can go below zero; wrapping keeps the final count
-        // exact, since it fits u32.
-        p(x1, y1, z1)
-            .wrapping_sub(p(x0, y1, z1))
-            .wrapping_sub(p(x1, y0, z1))
-            .wrapping_sub(p(x1, y1, z0))
-            .wrapping_add(p(x0, y0, z1))
-            .wrapping_add(p(x0, y1, z0))
-            .wrapping_add(p(x1, y0, z0))
-            .wrapping_sub(p(x0, y0, z0))
+        // Matches in [x0, x1) × [y0, y1) × [0, z]. Partial results can go
+        // below zero; wrapping keeps the final count exact, since it fits u32.
+        let rect = |z: usize| {
+            p(x1, y1, z)
+                .wrapping_sub(p(x0, y1, z))
+                .wrapping_sub(p(x1, y0, z))
+                .wrapping_add(p(x0, y0, z))
+        };
+        let below = if z0 == 0 { 0 } else { rect(z0 - 1) };
+        rect(z1 - 1).wrapping_sub(below)
     }
 
     /// Calls `f` with the box count of every cell of `region`, in z → y → x
-    /// order. Per row, the four (y, z) corner rows of the table combine into
-    /// one row `e`, and a cell costs two reads: `e[x1] - e[x0]`.
+    /// order. Per row, the (y, z) corner rows of the table (two in 2D, four
+    /// in 3D) combine into one row `e`, and a cell costs two reads:
+    /// `e[x1] - e[x0]`.
     fn for_each_count(&self, region: Bounds, r: Radius, mut f: impl FnMut(u32)) {
         let (o, s) = (self.bounds.origin, self.bounds.size);
         let ro = region.origin;
@@ -238,13 +239,17 @@ impl PrefixSums {
                     (0..region.size.width).for_each(|_| f(0));
                     continue;
                 };
-                let corners = row(y1, z1)
-                    .iter()
-                    .zip(row(y0, z1))
-                    .zip(row(y1, z0))
-                    .zip(row(y0, z0));
-                for (e, (((a, b), c), d)) in e.iter_mut().zip(corners) {
-                    *e = a.wrapping_sub(*b).wrapping_sub(*c).wrapping_add(*d);
+                for (e, (a, b)) in e
+                    .iter_mut()
+                    .zip(row(y1, z1 - 1).iter().zip(row(y0, z1 - 1)))
+                {
+                    *e = a.wrapping_sub(*b);
+                }
+                if z0 > 0 {
+                    let below = row(y1, z0 - 1).iter().zip(row(y0, z0 - 1));
+                    for (e, (c, d)) in e.iter_mut().zip(below) {
+                        *e = e.wrapping_sub(*c).wrapping_add(*d);
+                    }
                 }
                 for i in 0..region.size.width {
                     f(match span(local(ro.x, o.x, i), r.x, s.width) {
