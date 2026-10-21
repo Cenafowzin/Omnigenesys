@@ -8,4 +8,5 @@ pub mod condition;
 pub mod coords;
 pub mod grid;
 pub mod layer;
+pub mod mask;
 pub mod tile;

@@ -149,3 +149,25 @@ fn tile_error_messages() {
         assert_eq!(err.to_string(), expected);
     }
 }
+
+// TileSet
+
+#[test]
+fn tile_set_contains_exactly_its_ids() {
+    let ids = [TileId(0), TileId(3), TileId(63), TileId(64), TileId(200)];
+    let set = TileSet::new(&ids);
+    for i in 0..=300u16 {
+        assert_eq!(set.contains(TileId(i)), ids.contains(&TileId(i)), "id {i}");
+    }
+    // Ids past the largest one are simply absent, not out of range.
+    assert!(!set.contains(TileId(u16::MAX)));
+}
+
+#[test]
+fn tile_set_sizes_itself_to_its_largest_id() {
+    assert_eq!(TileSet::new(&[]).words.len(), 0);
+    assert_eq!(TileSet::new(&[TileId(63)]).words.len(), 1);
+    assert_eq!(TileSet::new(&[TileId(64)]).words.len(), 2);
+    assert_eq!(TileSet::new(&[TileId(u16::MAX)]).words.len(), 1024);
+    assert!(!TileSet::new(&[]).contains(TileId::EMPTY));
+}

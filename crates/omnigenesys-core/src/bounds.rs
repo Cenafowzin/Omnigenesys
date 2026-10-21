@@ -61,6 +61,19 @@ impl Bounds {
             })
         })
     }
+
+    #[inline]
+    pub(crate) fn index_of(&self, c: Coord) -> Option<usize> {
+        if self.contains(c) {
+            let local = c - self.origin;
+            let index = local.x as usize
+                + self.size.width as usize
+                    * (local.y as usize + self.size.height as usize * local.z as usize);
+            Some(index)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

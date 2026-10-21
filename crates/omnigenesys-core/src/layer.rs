@@ -47,15 +47,7 @@ impl<T: Clone> Layer<T> {
 impl<T> Layer<T> {
     #[inline]
     fn index(&self, c: Coord) -> Option<usize> {
-        if self.bounds.contains(c) {
-            let local = c - self.bounds.origin;
-            let index = local.x as usize
-                + self.bounds.size.width as usize
-                    * (local.y as usize + self.bounds.size.height as usize * local.z as usize);
-            Some(index)
-        } else {
-            None
-        }
+        self.bounds.index_of(c)
     }
 
     pub fn bounds(&self) -> Bounds {

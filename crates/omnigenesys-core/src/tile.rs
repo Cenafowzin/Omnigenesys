@@ -25,6 +25,32 @@ impl TileId {
     pub const EMPTY: TileId = TileId(0);
 }
 
+/// Set of tile ids with constant-time lookup: one bit per id, up to the
+/// largest one in the set (at most 8 KiB).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TileSet {
+    words: Box<[u64]>,
+}
+
+impl TileSet {
+    pub(crate) fn new(ids: &[TileId]) -> TileSet {
+        let bits = ids.iter().max().map_or(0, |t| t.0 as usize + 1);
+        let mut words = vec![0u64; bits.div_ceil(64)].into_boxed_slice();
+        for t in ids {
+            words[t.0 as usize >> 6] |= 1 << (t.0 & 63);
+        }
+        TileSet { words }
+    }
+
+    #[inline]
+    pub(crate) fn contains(&self, t: TileId) -> bool {
+        let i = t.0 as usize;
+        self.words
+            .get(i >> 6)
+            .is_some_and(|w| (w >> (i & 63)) & 1 == 1)
+    }
+}
+
 impl TileRegistry {
     pub fn new<I, S>(declared: I) -> Result<TileRegistry, TileError>
     where
