@@ -77,6 +77,10 @@ impl Grid {
         Ok(LayerId(index))
     }
 
+    pub fn layer_name(&self, id: LayerId) -> Option<&str> {
+        self.layers.get_index(id.0).map(|(name, _)| name.as_str())
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.layers.keys().map(|s| s.as_str())
     }

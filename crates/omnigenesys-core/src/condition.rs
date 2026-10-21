@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
+    access::Reach,
     bounds::Bounds,
     coords::Coord,
     grid::{Grid, GridError, LayerId},
@@ -311,6 +312,27 @@ impl TileSpec {
 impl CompiledCondition {
     pub fn prepare(&self, grid: &Grid) -> Result<PreparedCondition, ConditionError> {
         prepare(&self.0, grid).map(PreparedCondition)
+    }
+
+    /// Every layer the condition reads, and how far around each cell.
+    pub fn reads(&self) -> Vec<(LayerId, Reach)> {
+        let mut out = Vec::new();
+        reads(&self.0, &mut out);
+        out
+    }
+}
+
+fn reads(c: &Compiled, out: &mut Vec<(LayerId, Reach)>) {
+    match c {
+        Compiled::TileIs { layer, .. } => out.push((*layer, Reach::ZERO)),
+        Compiled::NearType { layer, radius, .. }
+        | Compiled::NotNearType { layer, radius, .. }
+        | Compiled::AreaIs { layer, radius, .. }
+        | Compiled::Count { layer, radius, .. } => {
+            out.push((*layer, Reach::symmetric(radius.x, radius.y, radius.z)));
+        }
+        Compiled::Any(cs) | Compiled::All(cs) => cs.iter().for_each(|c| reads(c, out)),
+        Compiled::Not(c) => reads(c, out),
     }
 }
 

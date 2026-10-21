@@ -15,6 +15,7 @@ serde_json = "1"
 schemars = "1"
 indexmap = "2"
 thiserror = "2"
+serde_path_to_error = "0.1"
 # rng: frozen contract (PLANNING §2.1). The golden vectors in tests/rng_contract.rs
 # guard every version bump of these.
 chacha20 = { version = "0.10.2", default-features = false, features = ["rng"] }
