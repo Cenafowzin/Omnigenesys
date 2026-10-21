@@ -6,3 +6,7 @@
 PLANNING.md
 CLAUDE.md
 docs/
+
+# insta: snapshots pending review (cargo insta review)
+*.snap.new
+*.pending-snap

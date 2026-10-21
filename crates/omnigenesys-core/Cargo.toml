@@ -8,7 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 # Add dependencies as each module needs them, not upfront.
-# Coming later: insta (golden snapshots).
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -21,3 +21,7 @@ serde_path_to_error = "0.1"
 chacha20 = { version = "0.10.2", default-features = false, features = ["rng"] }
 rand_core = "0.10"
 sha2 = { version = "0.11", default-features = false }
+
+[dev-dependencies]
+# Golden map snapshots in tests/snapshots.rs; review changes with `cargo insta review`.
+insta = "1.49"
