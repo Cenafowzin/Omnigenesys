@@ -9,4 +9,5 @@ pub mod coords;
 pub mod grid;
 pub mod layer;
 pub mod mask;
+pub mod rng;
 pub mod tile;
