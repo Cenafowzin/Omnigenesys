@@ -23,6 +23,13 @@ pub enum TileError {
 
 impl TileId {
     pub const EMPTY: TileId = TileId(0);
+
+    /// The tile's position in its registry: the number output v2 writes
+    /// and a palette indexes.
+    #[inline]
+    pub const fn index(self) -> u16 {
+        self.0
+    }
 }
 
 /// Set of tile ids with constant-time lookup: one bit per id, up to the

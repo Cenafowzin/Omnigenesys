@@ -7,6 +7,7 @@ pub mod access;
 pub mod bounds;
 pub mod condition;
 pub mod coords;
+pub mod export;
 pub mod grid;
 pub mod layer;
 pub mod mask;

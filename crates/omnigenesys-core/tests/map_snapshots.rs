@@ -10,6 +10,7 @@
 use omnigenesys_core::bounds::Bounds;
 use omnigenesys_core::condition::Condition;
 use omnigenesys_core::coords::{Coord, GridSize};
+use omnigenesys_core::export::{self, ENGINE_VERSION, Encoding, Provenance};
 use omnigenesys_core::grid::Grid;
 use omnigenesys_core::layer::LayerKind;
 use omnigenesys_core::operator::Registry;
@@ -138,4 +139,38 @@ fn island_depends_on_the_seed() {
     let size = GridSize::new(48, 16, 1);
     assert_eq!(generate(size, 512), generate(size, 512));
     assert_ne!(generate(size, 512), generate(size, 513));
+}
+
+/// The island as output v2, the bytes an engine receives.
+fn island_output(seed: u64) -> String {
+    let spec = PipelineSpec::parse(ISLAND).unwrap().spec;
+    let Built {
+        mut grid,
+        tiles,
+        pipeline,
+    } = spec.build(&Registry::with_builtins()).unwrap();
+    pipeline.run(&mut grid, &spec.salt, seed).unwrap();
+    let provenance = Provenance {
+        seed,
+        salted: !spec.salt.is_empty(),
+    };
+    let mut out = Vec::new();
+    export::write_json(&mut out, &grid, &tiles, provenance, Encoding::Auto).unwrap();
+    String::from_utf8(out).unwrap()
+}
+
+#[test]
+fn island_output_v2() {
+    // The version would change the snapshot on every release, not the map.
+    let text = island_output(512).replace(
+        &format!("\"engine_version\": \"{ENGINE_VERSION}\""),
+        "\"engine_version\": \"<engine>\"",
+    );
+    insta::assert_snapshot!(text);
+}
+
+#[test]
+fn the_same_seed_gives_the_same_bytes() {
+    assert_eq!(island_output(512), island_output(512));
+    assert_ne!(island_output(512), island_output(513));
 }

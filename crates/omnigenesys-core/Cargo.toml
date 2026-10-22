@@ -19,6 +19,8 @@ thiserror = "2"
 serde_path_to_error = "0.1"
 # spec: strict JSON with the position of every value (all extensions off).
 jsonc-parser = { version = "0.34", default-features = false }
+# export: integers to text without going through fmt (already a serde_json dependency).
+itoa = "1"
 # rng: frozen contract (PLANNING §2.1). The golden vectors in tests/rng_contract.rs
 # guard every version bump of these.
 chacha20 = { version = "0.10.2", default-features = false, features = ["rng"] }

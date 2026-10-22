@@ -192,6 +192,7 @@ dependencies = [
  "chacha20",
  "indexmap",
  "insta",
+ "itoa",
  "jsonc-parser",
  "rand_core",
  "schemars",

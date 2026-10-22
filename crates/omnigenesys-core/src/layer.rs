@@ -71,6 +71,11 @@ impl<T> Layer<T> {
         Ok(())
     }
 
+    /// Every cell, x fastest, then y, then z (the order of [`cells`](Self::cells)).
+    pub fn as_slice(&self) -> &[T] {
+        &self.cells
+    }
+
     pub fn cells(&self) -> impl Iterator<Item = &T> {
         self.cells.iter()
     }
