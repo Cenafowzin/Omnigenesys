@@ -277,3 +277,45 @@ fn a_broken_declaration_is_reported_once_not_again_at_each_use() {
     assert!(sites.is_empty());
     assert_eq!(doc["steps"][0]["config"]["a"], json!({"$param": "x"}));
 }
+
+#[test]
+fn values_from_text_are_read_by_the_declared_type() {
+    let p = declare(json!({
+        "n": {"type": "number", "default": 0.5, "min": 0, "max": 1},
+        "i": {"type": "integer", "default": 3},
+        "b": true,
+        "s": {"type": "string", "default": "forest", "enum": ["forest", "desert"]}
+    }))
+    .unwrap();
+    assert_eq!(p["n"].parse_value("0.25"), Ok(ParamValue::Number(0.25)));
+    assert_eq!(p["n"].parse_value("1"), Ok(ParamValue::Number(1.0)));
+    assert_eq!(p["i"].parse_value("-7"), Ok(ParamValue::Integer(-7)));
+    assert_eq!(p["b"].parse_value("false"), Ok(ParamValue::Boolean(false)));
+    assert_eq!(
+        p["s"].parse_value("desert"),
+        Ok(ParamValue::String("desert".to_string()))
+    );
+
+    let err = |name: &str, text: &str| p[name].parse_value(text).unwrap_err();
+    assert_eq!(err("n", "1.5"), "1.5 is outside min..=max");
+    assert_eq!(err("n", "lots"), "\"lots\" is not a number");
+    assert_eq!(err("n", "NaN"), "\"NaN\" is not a number");
+    assert_eq!(err("n", "inf"), "\"inf\" is not a number");
+    assert_eq!(err("i", "3.5"), "\"3.5\" is not an integer");
+    assert_eq!(err("b", "yes"), "\"yes\" is not a boolean");
+    assert_eq!(err("s", "tundra"), "\"tundra\" is not one of the enum");
+}
+
+#[test]
+fn check_is_the_rule_the_default_follows() {
+    let p = &declare(json!({"n": {"type": "number", "default": 0.5, "max": 1}})).unwrap()["n"];
+    assert_eq!(p.check(&ParamValue::Number(1.0)), Ok(()));
+    assert_eq!(
+        p.check(&ParamValue::Number(2.0)),
+        Err("2 is outside min..=max".to_string())
+    );
+    assert_eq!(
+        p.check(&ParamValue::Integer(1)),
+        Err("1 is not a number".to_string())
+    );
+}

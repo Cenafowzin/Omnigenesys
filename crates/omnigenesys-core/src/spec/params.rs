@@ -1,7 +1,7 @@
 //! Typed params and `{"$param": "name"}` substitution (PLANNING §2.1, items
 //! 5 and 6).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use indexmap::IndexMap;
@@ -76,6 +76,45 @@ pub(super) struct Declarations {
     /// Declared with an error (already reported): their uses stay quiet
     /// instead of adding "not declared" for the same mistake.
     pub broken: HashSet<String>,
+    /// Values given from outside the file, used instead of the default.
+    pub overrides: HashMap<String, ParamValue>,
+}
+
+/// Applies `name=value` overrides: each must name a declared param and
+/// fit its declaration. The last one for a name wins.
+pub(super) fn apply_overrides(
+    declared: &mut Declarations,
+    overrides: &[(String, String)],
+    errors: &mut Vec<Diagnostic>,
+) {
+    for (name, text) in overrides {
+        if declared.broken.contains(name) {
+            continue;
+        }
+        let Some(param) = declared.params.get(name) else {
+            let known: Vec<&str> = declared.params.keys().map(String::as_str).collect();
+            let known = if known.is_empty() {
+                "the file declares none".to_string()
+            } else {
+                format!("declared: {}", known.join(", "))
+            };
+            errors.push(Diagnostic::new(
+                "/params",
+                format!("override {name}={text}: no param '{name}' ({known})"),
+            ));
+            continue;
+        };
+        match param.parse_value(text) {
+            Ok(value) => {
+                declared.overrides.insert(name.clone(), value);
+            }
+            // Placed at the declaration: it says what the param accepts.
+            Err(m) => errors.push(Diagnostic::new(
+                param_pointer(name),
+                format!("override {name}={text}: {m}"),
+            )),
+        }
+    }
 }
 
 pub(super) fn declarations(params: Option<&Value>, errors: &mut Vec<Diagnostic>) -> Declarations {
@@ -230,32 +269,75 @@ fn full(d: Decl) -> Result<Param, (&'static str, String)> {
     {
         return Err(("step", format!("step {step} must be greater than 0")));
     }
-    let n = match default {
-        ParamValue::Number(n) => Some(n),
-        ParamValue::Integer(n) => Some(n as f64),
-        _ => None,
-    };
-    if let Some(n) = n
-        && (d.min.is_some_and(|min| n < min) || d.max.is_some_and(|max| n > max))
-    {
-        return Err(("default", format!("{n} is outside min..=max")));
+    if d.choices.is_some() && d.kind != ParamType::String {
+        return Err(("enum", format!("{} params have no enum", d.kind)));
     }
-    if let Some(choices) = &d.choices {
-        let ParamValue::String(s) = &default else {
-            return Err(("enum", format!("{} params have no enum", d.kind)));
-        };
-        if !choices.contains(s) {
-            return Err(("default", format!("\"{s}\" is not one of the enum")));
-        }
-    }
-    Ok(Param {
+    let param = Param {
         default,
         min: d.min,
         max: d.max,
         step: d.step,
         choices: d.choices,
         description: d.description,
-    })
+    };
+    param.check(&param.default).map_err(|m| ("default", m))?;
+    Ok(param)
+}
+
+impl Param {
+    pub fn kind(&self) -> ParamType {
+        self.default.kind()
+    }
+
+    /// Whether `value` fits the declaration: its type, `min..=max` and the
+    /// `enum`. The default is checked with this too, so a declaration and
+    /// an override follow the same rule.
+    pub fn check(&self, value: &ParamValue) -> Result<(), String> {
+        if value.kind() != self.kind() {
+            return Err(format!("{value} is not {}", a(self.kind())));
+        }
+        let n = match value {
+            ParamValue::Number(n) => Some(*n),
+            ParamValue::Integer(n) => Some(*n as f64),
+            _ => None,
+        };
+        if let Some(n) = n
+            && (self.min.is_some_and(|min| n < min) || self.max.is_some_and(|max| n > max))
+        {
+            return Err(format!("{n} is outside min..=max"));
+        }
+        if let (Some(choices), ParamValue::String(s)) = (&self.choices, value)
+            && !choices.contains(s)
+        {
+            return Err(format!("\"{s}\" is not one of the enum"));
+        }
+        Ok(())
+    }
+
+    /// A value written as text (a command-line override), read as this
+    /// param's type and checked.
+    pub fn parse_value(&self, text: &str) -> Result<ParamValue, String> {
+        let value = match self.kind() {
+            ParamType::Number => text
+                .parse()
+                .ok()
+                .filter(|n: &f64| n.is_finite())
+                .map(ParamValue::Number),
+            ParamType::Integer => text.parse().ok().map(ParamValue::Integer),
+            ParamType::Boolean => text.parse().ok().map(ParamValue::Boolean),
+            ParamType::String => Some(ParamValue::String(text.to_string())),
+        }
+        .ok_or_else(|| format!("\"{text}\" is not {}", a(self.kind())))?;
+        self.check(&value)?;
+        Ok(value)
+    }
+}
+
+/// As JSON writes it: `0.5`, `3`, `true`, `"forest"`.
+impl fmt::Display for ParamValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_json())
+    }
 }
 
 impl fmt::Display for ParamType {
@@ -389,7 +471,8 @@ impl Walker<'_> {
                     pointer: pointer.to_string(),
                     param: name.to_string(),
                 });
-                *value = param.default.to_json();
+                let chosen = self.params.overrides.get(name).unwrap_or(&param.default);
+                *value = chosen.to_json();
             }
             None if self.params.broken.contains(name) => {}
             None => self.error(

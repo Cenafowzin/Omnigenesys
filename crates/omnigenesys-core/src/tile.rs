@@ -98,6 +98,11 @@ impl TileRegistry {
         self.names.get_index(id.0 as usize).map(String::as_str)
     }
 
+    /// Every name in id order, `"empty"` first.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.names.iter().map(String::as_str)
+    }
+
     pub fn len(&self) -> usize {
         self.names.len()
     }

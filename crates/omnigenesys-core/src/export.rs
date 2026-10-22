@@ -114,12 +114,11 @@ pub fn write_json<W: Write>(
     w.raw(",\n  \"size\": ");
     w.triple(b.size.width, b.size.height, b.size.depth);
     w.raw(",\n  \"tiles\": [");
-    for i in 0..tiles.len() {
+    for (i, name) in tiles.names().enumerate() {
         if i > 0 {
             w.raw(", ");
         }
-        // Ids are the positions 0..len, so every one has a name.
-        w.string(tiles.name(TileId(i as u16)).unwrap_or_default());
+        w.string(name);
     }
     w.raw("],\n  \"layers\": [");
     for (i, layer) in layers.iter().enumerate() {

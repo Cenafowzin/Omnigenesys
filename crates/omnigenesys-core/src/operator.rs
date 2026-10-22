@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use schemars::{JsonSchema, Schema};
+use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
@@ -77,7 +77,9 @@ pub type Factory =
 #[derive(Debug, Clone, Copy)]
 pub struct Entry {
     pub factory: Factory,
-    pub schema: fn() -> Schema,
+    /// The config's schema, its definitions added to the generator: the
+    /// whole-file schema shares one table across operators and conditions.
+    pub schema: fn(&mut SchemaGenerator) -> Schema,
     pub dimensions: Dimensions,
     pub scope: Scope,
 }
@@ -155,8 +157,8 @@ fn build_boxed<O: OperatorType>(
     Ok(Box::new(O::build(config, bcx)?))
 }
 
-fn schema_of<T: JsonSchema>() -> Schema {
-    schemars::schema_for!(T)
+fn schema_of<T: JsonSchema>(generator: &mut SchemaGenerator) -> Schema {
+    generator.subschema_for::<T>()
 }
 
 /// Errors while building a step. The pipeline wraps them with the step id.

@@ -30,3 +30,4 @@ sha2 = { version = "0.11", default-features = false }
 [dev-dependencies]
 # Golden map snapshots in tests/snapshots.rs; review changes with `cargo insta review`.
 insta = "1.49"
+jsonschema = { version = "0.59", default-features = false }

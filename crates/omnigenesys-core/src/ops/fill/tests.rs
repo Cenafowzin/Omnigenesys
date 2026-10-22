@@ -133,7 +133,9 @@ fn fill_config_errors_are_build_errors() {
 #[test]
 fn fill_schema_requires_layer_and_tile() {
     let r = Registry::with_builtins();
-    let schema = serde_json::to_value((r.get("Fill").unwrap().schema)()).unwrap();
+    let mut generator = schemars::generate::SchemaSettings::draft07().into_generator();
+    (r.get("Fill").unwrap().schema)(&mut generator);
+    let schema = &generator.definitions()["FillConfig"];
     assert_eq!(schema["additionalProperties"], json!(false));
     let mut required: Vec<&str> = schema["required"]
         .as_array()

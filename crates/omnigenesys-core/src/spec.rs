@@ -4,6 +4,7 @@
 //! once rather than one per run.
 
 mod params;
+mod schema;
 mod source;
 
 use std::collections::HashMap;
@@ -26,6 +27,7 @@ use crate::{
 };
 
 pub use params::{Param, ParamType, ParamValue};
+pub use schema::schema;
 pub(crate) use source::pointer;
 
 use params::Site;
@@ -251,6 +253,17 @@ impl PipelineSpec {
     /// Reads a pipeline file. On success, `warnings` may still say
     /// something; on failure, every error found is returned.
     pub fn parse(text: &str) -> Result<Parsed, Vec<Diagnostic>> {
+        PipelineSpec::parse_with(text, &[])
+    }
+
+    /// As [`parse`](Self::parse), with param values given from outside
+    /// the file (`--param name=value`), as text read by each param's
+    /// declared type. `params` keeps the declarations; the steps get the
+    /// overridden values.
+    pub fn parse_with(
+        text: &str,
+        overrides: &[(String, String)],
+    ) -> Result<Parsed, Vec<Diagnostic>> {
         let (mut root, spans) = source::parse(text)?;
         let mut origin = Origin {
             spans,
@@ -261,7 +274,8 @@ impl PipelineSpec {
         }
 
         let mut errors = Vec::new();
-        let declared = params::declarations(root.get("params"), &mut errors);
+        let mut declared = params::declarations(root.get("params"), &mut errors);
+        params::apply_overrides(&mut declared, overrides, &mut errors);
         origin.sites = params::substitute(&mut root, &declared, &mut errors);
         let params = declared.params;
         let raw: RawRoot = match deserialize(root, "") {

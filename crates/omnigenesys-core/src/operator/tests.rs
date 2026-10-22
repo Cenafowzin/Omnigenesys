@@ -274,7 +274,13 @@ fn config_errors_say_where_in_the_config() {
 fn the_schema_comes_from_the_config_type() {
     let mut r = Registry::new();
     r.register::<Nop>().unwrap();
-    let schema = serde_json::to_value((r.get("Nop").unwrap().schema)()).unwrap();
+    let mut generator = schemars::generate::SchemaSettings::draft07().into_generator();
+    let reference = (r.get("Nop").unwrap().schema)(&mut generator);
+    assert_eq!(
+        serde_json::to_value(reference).unwrap(),
+        serde_json::json!({"$ref": "#/definitions/NopConfig"})
+    );
+    let schema = &generator.definitions()["NopConfig"];
     // deny_unknown_fields becomes additionalProperties: false.
     assert_eq!(schema["additionalProperties"], serde_json::json!(false));
     assert_eq!(schema["required"], serde_json::json!(["size"]));

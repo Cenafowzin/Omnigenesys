@@ -482,3 +482,54 @@ fn display_reads_like_a_compiler_message() {
     let bare = Diagnostic::new("", "the file is empty");
     assert_eq!(bare.to_string(), "the file is empty");
 }
+
+fn overrides(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(n, v)| (n.to_string(), v.to_string()))
+        .collect()
+}
+
+#[test]
+fn an_override_replaces_the_default_where_the_param_is_used() {
+    let parsed = PipelineSpec::parse_with(ISLAND, &overrides(&[("wall_chance", "0.3")])).unwrap();
+    assert_eq!(parsed.spec.steps[1].config["chance"], json!(0.3));
+    assert_eq!(
+        parsed.spec.params["wall_chance"].default,
+        ParamValue::Number(0.1),
+        "the declaration stays as written"
+    );
+    let last = overrides(&[("wall_chance", "0.3"), ("wall_chance", "0.2")]);
+    let parsed = PipelineSpec::parse_with(ISLAND, &last).unwrap();
+    assert_eq!(
+        parsed.spec.steps[1].config["chance"],
+        json!(0.2),
+        "the last one wins"
+    );
+}
+
+#[test]
+fn a_bad_override_is_an_error_at_the_declaration() {
+    let e = PipelineSpec::parse_with(ISLAND, &overrides(&[("wall_chance", "1.5")])).unwrap_err();
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0].pointer, "/params/wall_chance");
+    assert_eq!(
+        e[0].message,
+        "override wall_chance=1.5: 1.5 is outside min..=max"
+    );
+    assert_eq!(position(&e[0]), position_of(ISLAND, "\"wall_chance\": {"));
+}
+
+#[test]
+fn an_override_of_an_unknown_param_lists_the_declared_ones() {
+    let e = PipelineSpec::parse_with(ISLAND, &overrides(&[("wal_chance", "0.3")])).unwrap_err();
+    assert_eq!(
+        e[0].message,
+        "override wal_chance=0.3: no param 'wal_chance' (declared: wall_chance)"
+    );
+    let e = PipelineSpec::parse_with(&base().to_string(), &overrides(&[("x", "1")])).unwrap_err();
+    assert_eq!(
+        e[0].message,
+        "override x=1: no param 'x' (the file declares none)"
+    );
+}
