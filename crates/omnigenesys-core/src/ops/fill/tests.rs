@@ -124,7 +124,7 @@ fn fill_config_errors_are_build_errors() {
     let errors = w.run(&[typo]).unwrap_err();
     assert_eq!(errors.len(), 1);
     assert!(
-        errors[0].starts_with("step 'base': invalid config at 'tiel': unknown field `tiel`"),
+        errors[0].starts_with("step 'base': invalid config at '/tiel': unknown field `tiel`"),
         "{}",
         errors[0]
     );

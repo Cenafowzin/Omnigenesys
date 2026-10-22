@@ -145,11 +145,11 @@ fn build_boxed<O: OperatorType>(
     config: serde_json::Value,
     bcx: &mut BuildContext<'_>,
 ) -> Result<Box<dyn Operator>, BuildError> {
-    // serde_path_to_error keeps where in the config it failed: "radius",
-    // "rooms[2].size", and not only "invalid type".
+    // serde_path_to_error keeps where in the config it failed ("/radius",
+    // "/rooms/2/size"), and not only "invalid type".
     let config: O::Config =
         serde_path_to_error::deserialize(config).map_err(|e| BuildError::Config {
-            path: e.path().to_string(),
+            path: crate::spec::pointer(e.path()),
             message: e.inner().to_string(),
         })?;
     Ok(Box::new(O::build(config, bcx)?))
@@ -164,7 +164,8 @@ fn schema_of<T: JsonSchema>() -> Schema {
 pub enum BuildError {
     #[error("unknown operator '{name}'")]
     UnknownOperator { name: String },
-    #[error("invalid config at '{path}': {message}")]
+    /// `path` is a JSON Pointer into the config; `""` is the config itself.
+    #[error("invalid config{}: {message}", at(.path))]
     Config { path: String, message: String },
     #[error("invalid '{field}': {message}")]
     Invalid { field: String, message: String },
@@ -188,6 +189,15 @@ pub enum BuildError {
     Tile(#[from] TileError),
     #[error(transparent)]
     Condition(#[from] ConditionError),
+}
+
+/// " at '/radius'", or nothing for the config itself.
+fn at(path: &str) -> String {
+    if path.is_empty() {
+        String::new()
+    } else {
+        format!(" at '{path}'")
+    }
 }
 
 /// What an operator gets while it is built: name resolution, and the

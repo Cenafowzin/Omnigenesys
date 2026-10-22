@@ -1,0 +1,45 @@
+{
+  "version": 2,
+  "description": "Floor, scattered walls, lakes away from walls, trees on the floor.",
+  "seed": 512,
+  "size": { "width": 48, "height": 16 },
+  "layers": ["terrain", "objects"],
+  "tiles": ["floor", "wall", "water", "tree"],
+  "params": {
+    "wall_chance": {
+      "type": "number",
+      "default": 0.1,
+      "min": 0,
+      "max": 1,
+      "description": "Chance of a wall in each cell"
+    },
+    "lake_margin": 2
+  },
+  "steps": [
+    {
+      "id": "base",
+      "operator": "Fill",
+      "config": { "layer": "terrain", "tile": "floor" }
+    },
+    {
+      "id": "walls",
+      "operator": "Scatter",
+      "config": { "layer": "terrain", "tile": "wall", "chance": { "$param": "wall_chance" } }
+    },
+    {
+      "id": "lakes",
+      "operator": "Fill",
+      "description": "Water wherever no wall is near.",
+      "config": { "layer": "terrain", "tile": "water" },
+      "conditions": [
+        { "type": "not_near_type", "layer": "terrain", "tile": "wall", "distance": { "$param": "lake_margin" } }
+      ]
+    },
+    {
+      "id": "trees",
+      "operator": "Scatter",
+      "config": { "layer": "objects", "tile": "tree", "chance": 0.15 },
+      "conditions": [{ "type": "tile_is", "layer": "terrain", "tile": "floor" }]
+    }
+  ]
+}

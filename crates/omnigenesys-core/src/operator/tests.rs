@@ -260,14 +260,14 @@ fn config_errors_say_where_in_the_config() {
         panic!("expected a config error, got {typo:?}");
     };
     // The path points at the misspelled field itself.
-    assert_eq!(path, "lable");
+    assert_eq!(path, "/lable");
     assert!(message.contains("unknown field `lable`"), "{message}");
 
     let wrong = build_nop(serde_json::json!({"size": "big"})).unwrap_err();
     let BuildError::Config { path, .. } = wrong else {
         panic!("expected a config error, got {wrong:?}");
     };
-    assert_eq!(path, "size");
+    assert_eq!(path, "/size");
 }
 
 #[test]

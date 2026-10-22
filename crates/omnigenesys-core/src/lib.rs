@@ -14,4 +14,5 @@ pub mod operator;
 pub mod ops;
 pub mod pipeline;
 pub mod rng;
+pub mod spec;
 pub mod tile;

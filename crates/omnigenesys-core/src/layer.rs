@@ -1,6 +1,7 @@
 use crate::bounds::Bounds;
 use crate::coords::{Coord, GridSize};
 use crate::tile::TileId;
+use serde::Deserialize;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15,7 +16,8 @@ pub enum AnyLayer {
     Tiles(Layer<TileId>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LayerKind {
     Tiles,
 }

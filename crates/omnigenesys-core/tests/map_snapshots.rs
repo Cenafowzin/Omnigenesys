@@ -14,6 +14,7 @@ use omnigenesys_core::grid::Grid;
 use omnigenesys_core::layer::LayerKind;
 use omnigenesys_core::operator::Registry;
 use omnigenesys_core::pipeline::{Pipeline, StepSpec};
+use omnigenesys_core::spec::{Built, PipelineSpec};
 use omnigenesys_core::tile::TileRegistry;
 use serde_json::{Value, json};
 
@@ -30,44 +31,22 @@ fn step(id: &str, operator: &str, config: Value, conditions: &[&str]) -> StepSpe
     }
 }
 
-/// Floor, scattered walls, lakes away from walls, trees on the floor.
-fn island_steps() -> Vec<StepSpec> {
-    vec![
-        step(
-            "base",
-            "Fill",
-            json!({"layer": "terrain", "tile": "floor"}),
-            &[],
-        ),
-        step(
-            "walls",
-            "Scatter",
-            json!({"layer": "terrain", "tile": "wall", "chance": 0.1}),
-            &[],
-        ),
-        step(
-            "lakes",
-            "Fill",
-            json!({"layer": "terrain", "tile": "water"}),
-            &[r#"{"type": "not_near_type", "layer": "terrain", "tile": "wall", "distance": 2}"#],
-        ),
-        step(
-            "trees",
-            "Scatter",
-            json!({"layer": "objects", "tile": "tree", "chance": 0.15}),
-            &[r#"{"type": "tile_is", "layer": "terrain", "tile": "floor"}"#],
-        ),
-    ]
-}
+/// Floor, scattered walls, lakes away from walls, trees on the floor:
+/// tests/pipelines/island.json, read like any user's file.
+const ISLAND: &str = include_str!("pipelines/island.json");
 
 fn generate(size: GridSize, seed: u64) -> String {
-    let mut grid = Grid::new(Bounds::new(Coord::ZERO, size));
-    let terrain = grid.add_layer("terrain", LayerKind::Tiles).unwrap();
-    let objects = grid.add_layer("objects", LayerKind::Tiles).unwrap();
-    let tiles = TileRegistry::new(["floor", "wall", "water", "tree"]).unwrap();
-    let pipeline =
-        Pipeline::build(&Registry::with_builtins(), &grid, &tiles, &island_steps()).unwrap();
-    pipeline.run(&mut grid, "", seed).unwrap();
+    let parsed = PipelineSpec::parse(ISLAND).unwrap();
+    let mut spec = parsed.spec;
+    spec.size = size;
+    let Built {
+        mut grid,
+        tiles,
+        pipeline,
+    } = spec.build(&Registry::with_builtins()).unwrap();
+    pipeline.run(&mut grid, &spec.salt, seed).unwrap();
+    let terrain = grid.layer_id("terrain").unwrap();
+    let objects = grid.layer_id("objects").unwrap();
 
     // An object is drawn over the terrain under it.
     let glyph = |name: &str| match name {
@@ -145,6 +124,13 @@ fn scatter_gives_each_cell_the_same_answer_in_any_map() {
         walls_seen += usize::from(big(c));
     }
     assert!(walls_seen > 0, "the overlap must contain walls to compare");
+}
+
+#[test]
+fn the_island_file_is_clean() {
+    let parsed = PipelineSpec::parse(ISLAND).unwrap();
+    assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+    assert_eq!(parsed.spec.seed, Some(512));
 }
 
 #[test]
