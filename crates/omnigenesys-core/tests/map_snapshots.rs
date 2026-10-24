@@ -10,7 +10,7 @@
 use omnigenesys_core::bounds::Bounds;
 use omnigenesys_core::condition::Condition;
 use omnigenesys_core::coords::{Coord, GridSize};
-use omnigenesys_core::export::{self, ENGINE_VERSION, Encoding, Provenance};
+use omnigenesys_core::export::{self, ENGINE_VERSION, Encoding};
 use omnigenesys_core::grid::Grid;
 use omnigenesys_core::layer::LayerKind;
 use omnigenesys_core::operator::Registry;
@@ -150,12 +150,9 @@ fn island_output(seed: u64) -> String {
         pipeline,
     } = spec.build(&Registry::with_builtins()).unwrap();
     pipeline.run(&mut grid, &spec.salt, seed).unwrap();
-    let provenance = Provenance {
-        seed,
-        salted: !spec.salt.is_empty(),
-    };
+    let provenance = spec.provenance(seed, &spec.salt);
     let mut out = Vec::new();
-    export::write_json(&mut out, &grid, &tiles, provenance, Encoding::Auto).unwrap();
+    export::write_json(&mut out, &grid, &tiles, &provenance, Encoding::Auto).unwrap();
     String::from_utf8(out).unwrap()
 }
 

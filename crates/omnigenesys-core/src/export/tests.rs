@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use super::*;
+use crate::spec::ParamValue;
 use crate::{
     bounds::Bounds,
     coords::{Coord, GridSize},
@@ -27,11 +28,12 @@ fn small() -> Grid {
 const SEED: Provenance = Provenance {
     seed: 512,
     salted: false,
+    params: Vec::new(),
 };
 
 fn write(grid: &Grid, provenance: Provenance, encoding: Encoding) -> String {
     let mut out = Vec::new();
-    write_json(&mut out, grid, &tiles(), provenance, encoding).unwrap();
+    write_json(&mut out, grid, &tiles(), &provenance, encoding).unwrap();
     String::from_utf8(out).unwrap()
 }
 
@@ -70,6 +72,7 @@ fn writes_the_documented_format_byte_for_byte() {
   "engine_version": "{ENGINE_VERSION}",
   "seed": "512",
   "salted": false,
+  "params": {{}},
   "origin": [0, 0, 0],
   "size": [4, 2, 1],
   "tiles": ["empty", "floor", "wall"],
@@ -153,6 +156,7 @@ fn the_seed_is_a_string_and_the_salt_is_never_written() {
     let p = Provenance {
         seed: u64::MAX,
         salted: true,
+        params: Vec::new(),
     };
     let (v, _) = decode(&write(&small(), p, Encoding::Auto));
     assert_eq!(v["seed"], "18446744073709551615");
@@ -174,7 +178,7 @@ fn names_are_escaped() {
     g.add_layer("a \"b\" \\ c\n", LayerKind::Tiles).unwrap();
     let mut out = Vec::new();
     let odd = TileRegistry::new(["ção", "tab\there"]).unwrap();
-    write_json(&mut out, &g, &odd, SEED, Encoding::Auto).unwrap();
+    write_json(&mut out, &g, &odd, &SEED, Encoding::Auto).unwrap();
     let text = String::from_utf8(out).unwrap();
     assert!(text.contains(r#""name": "a \"b\" \\ c\u000a""#), "{text}");
     let v: Value = serde_json::from_str(&text).unwrap();
@@ -188,7 +192,7 @@ fn an_unregistered_tile_fails_before_writing_anything() {
     let t = g.add_layer("objects", LayerKind::Tiles).unwrap();
     g.tiles_mut(t).unwrap().set(Coord::ZERO, TileId(9)).unwrap();
     let mut out = Vec::new();
-    let e = write_json(&mut out, &g, &tiles(), SEED, Encoding::Auto).unwrap_err();
+    let e = write_json(&mut out, &g, &tiles(), &SEED, Encoding::Auto).unwrap_err();
     assert_eq!(
         e.to_string(),
         "layer 'objects' has tile id 9, but only 3 tiles are registered"
@@ -242,7 +246,7 @@ fn data_len(pattern: &[u16], encoding: Encoding) -> (usize, String) {
     }
     let mut out = Vec::new();
     let many = TileRegistry::new((1..=12).map(|i| format!("t{i}"))).unwrap();
-    write_json(&mut out, &g, &many, SEED, encoding).unwrap();
+    write_json(&mut out, &g, &many, &SEED, encoding).unwrap();
     let text = String::from_utf8(out).unwrap();
     let start = text.find("\"data\": [").unwrap() + "\"data\": [".len();
     let end = text[start..].find("]}").unwrap() + start;
@@ -289,4 +293,57 @@ fn output_larger_than_a_block_is_complete() {
     let (_, layers) = decode(&text);
     let expected: Vec<u16> = (0..300 * 300).map(|i| (i * 7 % 3) as u16).collect();
     assert_eq!(layers[0].1, expected);
+}
+
+#[test]
+fn params_are_written_with_their_type_and_read_back_exactly() {
+    let values = [
+        ("chance", ParamValue::Number(0.3)),
+        ("whole", ParamValue::Number(1.0)),
+        ("tiny", ParamValue::Number(1e-7)),
+        ("third", ParamValue::Number(1.0 / 3.0)),
+        ("passes", ParamValue::Integer(-4)),
+        ("rivers", ParamValue::Boolean(true)),
+        ("biome", ParamValue::String("des\"ert".to_string())),
+    ];
+    let p = Provenance {
+        seed: 1,
+        salted: false,
+        params: values
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.clone()))
+            .collect(),
+    };
+    let text = write(&small(), p, Encoding::Auto);
+    assert!(
+        text.contains(
+            r#""params": {"chance": 0.3, "whole": 1.0, "tiny": 0.0000001, "third": 0.3333333333333333, "passes": -4, "rivers": true, "biome": "des\"ert"},"#
+        ),
+        "{text}"
+    );
+    let (v, _) = decode(&text);
+    assert_eq!(
+        v["params"]["third"].as_f64(),
+        Some(1.0 / 3.0),
+        "reads back as the same f64"
+    );
+    assert_eq!(v["params"]["tiny"].as_f64(), Some(1e-7));
+    assert!(
+        v["params"]["whole"].is_f64(),
+        "a number param stays a float"
+    );
+    assert!(v["params"]["passes"].is_i64());
+}
+
+#[test]
+fn a_non_finite_param_fails_before_writing() {
+    let p = Provenance {
+        seed: 1,
+        salted: false,
+        params: vec![("x".to_string(), ParamValue::Number(f64::NAN))],
+    };
+    let mut out = Vec::new();
+    let e = write_json(&mut out, &small(), &tiles(), &p, Encoding::Auto).unwrap_err();
+    assert_eq!(e.to_string(), "param 'x' is NaN, which JSON cannot hold");
+    assert!(out.is_empty());
 }

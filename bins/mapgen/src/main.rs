@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use omnigenesys_core::export::{self, Encoding, Provenance};
+use omnigenesys_core::export::{self, Encoding};
 use omnigenesys_core::operator::{Dimensions, Registry, Scope};
 use omnigenesys_core::spec::{self, Built, MAX_NUMBER_SEED, PipelineSpec};
 
@@ -186,22 +186,19 @@ fn generate(registry: &Registry, g: Generate) -> Result<(), Failed> {
             seed
         }
     };
-    let salt = g.salt.unwrap_or(spec.salt);
+    let salt = g.salt.unwrap_or_else(|| spec.salt.clone());
     pipeline.run(&mut grid, &salt, seed).map_err(fail)?;
 
-    let provenance = Provenance {
-        seed,
-        salted: !salt.is_empty(),
-    };
+    let provenance = spec.provenance(seed, &salt);
     let encoding = g.encoding.into();
     match &g.output {
         Some(path) => {
             let file = File::create(path)
                 .map_err(|e| fail(format_args!("cannot create {}: {e}", path.display())))?;
-            export::write_json(file, &grid, &tiles, provenance, encoding).map_err(fail)?;
+            export::write_json(file, &grid, &tiles, &provenance, encoding).map_err(fail)?;
         }
         None => {
-            export::write_json(io::stdout().lock(), &grid, &tiles, provenance, encoding)
+            export::write_json(io::stdout().lock(), &grid, &tiles, &provenance, encoding)
                 .map_err(fail)?;
         }
     }

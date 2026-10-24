@@ -8,6 +8,7 @@ expression: text
   "engine_version": "<engine>",
   "seed": "512",
   "salted": false,
+  "params": {"wall_chance": 0.1, "lake_margin": 2},
   "origin": [0, 0, 0],
   "size": [48, 16, 1],
   "tiles": ["empty", "floor", "wall", "water", "tree"],

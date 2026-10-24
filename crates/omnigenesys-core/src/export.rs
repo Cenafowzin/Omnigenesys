@@ -14,6 +14,7 @@
 //!   "engine_version": "0.1.0",
 //!   "seed": "512",
 //!   "salted": false,
+//!   "params": {"wall_chance": 0.1, "lake_margin": 2},
 //!   "origin": [0, 0, 0],
 //!   "size": [4, 2, 1],
 //!   "tiles": ["empty", "floor", "wall"],
@@ -34,6 +35,7 @@ use thiserror::Error;
 
 use crate::{
     grid::{Grid, GridError},
+    spec::ParamValue,
     tile::{TileId, TileRegistry},
 };
 
@@ -57,13 +59,20 @@ pub enum Encoding {
     Dense,
 }
 
-/// How the map was made. The salt itself is never written: it exists so a
-/// shared pipeline or map does not reveal it (PLANNING §2.1), and whoever
-/// needs to reproduce the map already has it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How the map was made: with the pipeline file (and the salt, when
+/// `salted`), enough to make it again. Usually from
+/// [`PipelineSpec::provenance`](crate::spec::PipelineSpec::provenance).
+///
+/// The salt itself is never written: it exists so a shared pipeline or map
+/// does not reveal it (PLANNING §2.1), and whoever needs to reproduce the
+/// map already has it.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Provenance {
     pub seed: u64,
     pub salted: bool,
+    /// Every declared param with the value the map was made with (an
+    /// override or the default), in declaration order.
+    pub params: Vec<(String, ParamValue)>,
 }
 
 #[derive(Debug, Error)]
@@ -78,6 +87,8 @@ pub enum ExportError {
         id: u16,
         count: usize,
     },
+    #[error("param '{name}' is {value}, which JSON cannot hold")]
+    NonFiniteParam { name: String, value: f64 },
 }
 
 /// Writes the map as output v2. Writes go out in 64 KiB blocks, so a bare
@@ -89,9 +100,19 @@ pub fn write_json<W: Write>(
     out: W,
     grid: &Grid,
     tiles: &TileRegistry,
-    provenance: Provenance,
+    provenance: &Provenance,
     encoding: Encoding,
 ) -> Result<(), ExportError> {
+    for (name, value) in &provenance.params {
+        if let ParamValue::Number(n) = value
+            && !n.is_finite()
+        {
+            return Err(ExportError::NonFiniteParam {
+                name: name.clone(),
+                value: *n,
+            });
+        }
+    }
     let layers = plan(grid, tiles, encoding)?;
     let mut w = Writer {
         out,
@@ -109,6 +130,16 @@ pub fn write_json<W: Write>(
     w.int(provenance.seed);
     w.raw("\",\n  \"salted\": ");
     w.raw(if provenance.salted { "true" } else { "false" });
+    w.raw(",\n  \"params\": {");
+    for (i, (name, value)) in provenance.params.iter().enumerate() {
+        if i > 0 {
+            w.raw(", ");
+        }
+        w.string(name);
+        w.raw(": ");
+        w.param(value);
+    }
+    w.raw("}");
     w.raw(",\n  \"origin\": ");
     w.triple(b.origin.x, b.origin.y, b.origin.z);
     w.raw(",\n  \"size\": ");
@@ -261,6 +292,25 @@ impl<W: Write> Writer<W> {
         self.raw(", ");
         self.int(c);
         self.raw("]");
+    }
+
+    /// A param value. A float is written by Rust's own formatting, not
+    /// serde_json's (whose algorithm has changed): the shortest decimal that
+    /// reads back as the same number, never in exponent form. A whole
+    /// `number` keeps a `.0` so it still reads as one.
+    fn param(&mut self, value: &ParamValue) {
+        match value {
+            ParamValue::Number(n) => {
+                let text = n.to_string();
+                self.raw(&text);
+                if !text.contains('.') {
+                    self.raw(".0");
+                }
+            }
+            ParamValue::Integer(n) => self.int(*n),
+            ParamValue::Boolean(b) => self.raw(if *b { "true" } else { "false" }),
+            ParamValue::String(s) => self.string(s),
+        }
     }
 
     /// A JSON string: `"` and `\` escaped, control characters as `\u00XX`.

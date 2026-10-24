@@ -19,6 +19,7 @@ use crate::{
     bounds::Bounds,
     condition::{Condition, ConditionError},
     coords::{Coord, GridSize},
+    export::Provenance,
     grid::{Grid, GridError},
     layer::LayerKind,
     operator::{BuildError, Registry},
@@ -53,9 +54,11 @@ pub struct PipelineSpec {
     pub layers: Vec<LayerSpec>,
     /// Declared tiles, in order; `"empty"` (id 0) is implicit.
     pub tiles: Vec<String>,
-    /// As declared. Their defaults are already in `steps`.
+    /// As declared. The values used (overrides or defaults) are already in
+    /// `steps`, and in [`param_values`](Self::param_values).
     pub params: indexmap::IndexMap<String, Param>,
     pub steps: Vec<StepSpec>,
+    values: Vec<(String, ParamValue)>,
     origin: Origin,
 }
 
@@ -277,6 +280,14 @@ impl PipelineSpec {
         let mut declared = params::declarations(root.get("params"), &mut errors);
         params::apply_overrides(&mut declared, overrides, &mut errors);
         origin.sites = params::substitute(&mut root, &declared, &mut errors);
+        let values = declared
+            .params
+            .iter()
+            .map(|(name, p)| {
+                let value = declared.overrides.get(name).unwrap_or(&p.default);
+                (name.clone(), value.clone())
+            })
+            .collect();
         let params = declared.params;
         let raw: RawRoot = match deserialize(root, "") {
             Ok(raw) => raw,
@@ -338,9 +349,26 @@ impl PipelineSpec {
             tiles: raw.tiles,
             params,
             steps,
+            values,
             origin,
         };
         Ok(Parsed { spec, warnings })
+    }
+
+    /// Every declared param with the value the steps got: the override if
+    /// there was one, else the default. In declaration order.
+    pub fn param_values(&self) -> &[(String, ParamValue)] {
+        &self.values
+    }
+
+    /// What the output records about a map made from this spec with `seed`
+    /// and `salt`.
+    pub fn provenance(&self, seed: u64, salt: &str) -> Provenance {
+        Provenance {
+            seed,
+            salted: !salt.is_empty(),
+            params: self.values.clone(),
+        }
     }
 
     /// Makes the grid, the tiles and the pipeline. Every step is built and

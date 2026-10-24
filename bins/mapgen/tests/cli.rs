@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use omnigenesys_core::export::{self, Encoding, Provenance};
+use omnigenesys_core::export::{self, Encoding};
 use omnigenesys_core::operator::Registry;
 use omnigenesys_core::spec::{Built, PipelineSpec};
 
@@ -46,11 +46,8 @@ fn library_output(seed: u64, salt: &str) -> String {
     } = spec.build(&Registry::with_builtins()).unwrap();
     pipeline.run(&mut grid, salt, seed).unwrap();
     let mut out = Vec::new();
-    let p = Provenance {
-        seed,
-        salted: !salt.is_empty(),
-    };
-    export::write_json(&mut out, &grid, &tiles, p, Encoding::Auto).unwrap();
+    let p = spec.provenance(seed, salt);
+    export::write_json(&mut out, &grid, &tiles, &p, Encoding::Auto).unwrap();
     String::from_utf8(out).unwrap()
 }
 
