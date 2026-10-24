@@ -15,8 +15,8 @@ use crate::{
 /// functions": with `d` the distance from the centre (0 there, 1 at the
 /// edge), `e = lerp(e, 1 − d, mix)`.
 ///
-/// The centre and the edges are the map's: when maps are made in chunks,
-/// this needs the size of the whole map, not of the chunk.
+/// The centre and the edges are the whole map's, not the chunk's: every
+/// chunk of a map computes the same value for the same cell.
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FalloffConfig {
@@ -82,12 +82,13 @@ impl Operator for Falloff {
             Some(c) => grid.prepare(c)?.eval(region),
             None => CellMask::full(region),
         };
-        let (w, h) = (f64::from(region.size.width), f64::from(region.size.height));
+        let map = grid.map();
+        let (w, h) = (f64::from(map.size.width), f64::from(map.size.height));
         let layer = grid.scalars_mut(self.layer)?;
         for c in mask.iter_ones() {
             // -1..1 across the map, at the centre of the cell.
-            let nx = (2.0 * (f64::from(c.x - region.origin.x) + 0.5) / w - 1.0) as f32;
-            let ny = (2.0 * (f64::from(c.y - region.origin.y) + 0.5) / h - 1.0) as f32;
+            let nx = (2.0 * (f64::from(c.x - map.origin.x) + 0.5) / w - 1.0) as f32;
+            let ny = (2.0 * (f64::from(c.y - map.origin.y) + 0.5) / h - 1.0) as f32;
             let d = match self.shape {
                 FalloffShape::Square => 1.0 - (1.0 - nx * nx) * (1.0 - ny * ny),
                 FalloffShape::Round => ((nx * nx + ny * ny) / std::f32::consts::SQRT_2).min(1.0),

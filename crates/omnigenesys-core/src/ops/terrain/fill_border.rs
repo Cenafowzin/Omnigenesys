@@ -11,9 +11,9 @@ use crate::{
     tile::TileId,
 };
 
-/// Sets the cells within `thickness` of the edge of the map to one tile;
-/// with step conditions, only those where they hold. A map narrower than
-/// two thicknesses is all border.
+/// Sets the cells within `thickness` of the edge of the whole map to one
+/// tile; with step conditions, only those where they hold. A map narrower
+/// than two thicknesses is all border.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FillBorderConfig {
@@ -65,23 +65,21 @@ impl Operator for FillBorder {
             Some(c) => Some(grid.prepare(c)?.eval(region)),
             None => None,
         };
+        let map = grid.map();
         let layer = grid.tiles_mut(self.layer)?;
-        let (w, h) = (region.size.width as usize, region.size.height as usize);
-        let t = self.thickness as usize;
-        let cells = layer.as_mut_slice();
-        for (y, row) in cells.chunks_exact_mut(w.max(1)).enumerate() {
-            // Top and bottom rows whole; the others, the two ends only.
-            let left = t.min(w);
-            let spans = if y < t || y + t >= h {
-                [0..w, w..w]
-            } else {
-                [0..left, w.saturating_sub(t).max(left)..w]
-            };
-            for x in spans.into_iter().flatten() {
-                let c = region.origin + Coord::new(x as i32, y as i32, 0);
-                if mask.as_ref().is_none_or(|m| m.get(c)) {
-                    row[x] = self.tile;
-                }
+        let t = i64::from(self.thickness);
+        // Within `thickness` of an edge of the whole map — never the
+        // chunk's — so every chunk draws the same border.
+        let (x0, y0) = (i64::from(map.origin.x), i64::from(map.origin.y));
+        let x1 = x0 + i64::from(map.size.width) - 1;
+        let y1 = y0 + i64::from(map.size.height) - 1;
+        let near_edge = |c: Coord| {
+            let (x, y) = (i64::from(c.x), i64::from(c.y));
+            x - x0 < t || x1 - x < t || y - y0 < t || y1 - y < t
+        };
+        for c in region.iter() {
+            if near_edge(c) && mask.as_ref().is_none_or(|m| m.get(c)) {
+                layer.set(c, self.tile)?;
             }
         }
         Ok(())

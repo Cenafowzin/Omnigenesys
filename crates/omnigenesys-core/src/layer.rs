@@ -1,5 +1,6 @@
 use crate::bounds::Bounds;
 use crate::coords::{Coord, GridSize};
+use crate::object::ObjectLayer;
 use crate::tile::TileId;
 use serde::Deserialize;
 use thiserror::Error;
@@ -16,6 +17,9 @@ pub enum AnyLayer {
     Tiles(Layer<TileId>),
     /// A number per cell: height, moisture, density (PLANNING §8.4).
     Scalar(Layer<f32>),
+    /// Things with a place but no value per cell: rooms, connections
+    /// (PLANNING §2.12).
+    Objects(ObjectLayer),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
@@ -23,6 +27,7 @@ pub enum AnyLayer {
 pub enum LayerKind {
     Tiles,
     Scalar,
+    Objects,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -121,6 +126,7 @@ impl AnyLayer {
         match self {
             AnyLayer::Tiles(_) => LayerKind::Tiles,
             AnyLayer::Scalar(_) => LayerKind::Scalar,
+            AnyLayer::Objects(_) => LayerKind::Objects,
         }
     }
 
@@ -129,6 +135,7 @@ impl AnyLayer {
         match self {
             AnyLayer::Tiles(layer) => layer.bounds(),
             AnyLayer::Scalar(layer) => layer.bounds(),
+            AnyLayer::Objects(layer) => layer.bounds(),
         }
     }
 
@@ -136,7 +143,7 @@ impl AnyLayer {
     pub fn as_tiles(&self) -> Option<&Layer<TileId>> {
         match self {
             AnyLayer::Tiles(layer) => Some(layer),
-            AnyLayer::Scalar(_) => None,
+            _ => None,
         }
     }
 
@@ -144,7 +151,7 @@ impl AnyLayer {
     pub fn as_tiles_mut(&mut self) -> Option<&mut Layer<TileId>> {
         match self {
             AnyLayer::Tiles(layer) => Some(layer),
-            AnyLayer::Scalar(_) => None,
+            _ => None,
         }
     }
 
@@ -152,7 +159,7 @@ impl AnyLayer {
     pub fn as_scalar(&self) -> Option<&Layer<f32>> {
         match self {
             AnyLayer::Scalar(layer) => Some(layer),
-            AnyLayer::Tiles(_) => None,
+            _ => None,
         }
     }
 
@@ -160,7 +167,21 @@ impl AnyLayer {
     pub fn as_scalar_mut(&mut self) -> Option<&mut Layer<f32>> {
         match self {
             AnyLayer::Scalar(layer) => Some(layer),
-            AnyLayer::Tiles(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn as_objects(&self) -> Option<&ObjectLayer> {
+        match self {
+            AnyLayer::Objects(layer) => Some(layer),
+            _ => None,
+        }
+    }
+
+    pub fn as_objects_mut(&mut self) -> Option<&mut ObjectLayer> {
+        match self {
+            AnyLayer::Objects(layer) => Some(layer),
+            _ => None,
         }
     }
 }
@@ -170,6 +191,7 @@ impl std::fmt::Display for LayerKind {
         match self {
             LayerKind::Tiles => write!(f, "tiles"),
             LayerKind::Scalar => write!(f, "scalar"),
+            LayerKind::Objects => write!(f, "objects"),
         }
     }
 }

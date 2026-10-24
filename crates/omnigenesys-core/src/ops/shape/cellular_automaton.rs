@@ -128,6 +128,10 @@ impl Operator for CellularAutomaton {
         if width == 0 || height == 0 {
             return Ok(());
         }
+        // `outside` frames the region. For a whole map that is the map's
+        // edge. For a chunk, the region's edge lies in its padding, which
+        // reaches `iterations` cells: no cell inside the chunk can see that
+        // far in `iterations` passes, so the frame never reaches it.
         let fill = match self.outside {
             Outside::Alive => !0,
             Outside::Dead => 0,

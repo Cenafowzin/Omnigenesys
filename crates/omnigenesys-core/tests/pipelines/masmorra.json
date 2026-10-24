@@ -1,0 +1,85 @@
+{
+  "version": 2,
+  "description": "Masmorra clássica",
+  "seed": 512,
+  "size": {
+    "width": 96,
+    "height": 64
+  },
+  "layers": [
+    "terreno",
+    {
+      "name": "salas",
+      "kind": "objects"
+    },
+    {
+      "name": "conexoes",
+      "kind": "objects"
+    }
+  ],
+  "tiles": [
+    "pedra",
+    "chao",
+    "parede",
+    "porta",
+    "chao_chefe",
+    "chao_inicio"
+  ],
+  "steps": [
+    {
+      "id": "rocha",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "pedra"
+      }
+    },
+    {
+      "id": "salas",
+      "operator": "PlaceRooms",
+      "config": {
+        "layer": "terreno",
+        "rooms": "salas",
+        "floor": "chao",
+        "wall": "parede",
+        "tries": 40
+      }
+    },
+    {
+      "id": "corredores",
+      "operator": "ConnectRooms",
+      "config": {
+        "rooms": "salas",
+        "connections": "conexoes",
+        "layer": "terreno",
+        "floor": "chao",
+        "door": "porta",
+        "strategy": "mst",
+        "loops": 0.15,
+        "corridor": "l"
+      }
+    },
+    {
+      "id": "papeis",
+      "operator": "AssignRooms",
+      "config": {
+        "rooms": "salas",
+        "connections": "conexoes",
+        "layer": "terreno",
+        "floor": "chao",
+        "roles": [
+          {
+            "role": "start",
+            "pick": "first",
+            "tile": "chao_inicio"
+          },
+          {
+            "role": "boss",
+            "pick": "farthest",
+            "tile": "chao_chefe"
+          }
+        ]
+      }
+    }
+  ]
+}

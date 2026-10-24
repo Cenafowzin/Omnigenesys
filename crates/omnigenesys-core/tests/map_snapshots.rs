@@ -154,6 +154,40 @@ const TERRAIN_GLYPHS: &[(&str, char)] = &[
     ("neve", '*'),
 ];
 
+const DUNGEON_GLYPHS: &[(&str, char)] = &[
+    ("empty", ' '),
+    ("pedra", ' '),
+    ("chao", '.'),
+    ("parede", '#'),
+    ("porta", '+'),
+    ("porta_secreta", '?'),
+    ("chao_chefe", 'B'),
+    ("chao_tesouro", 'T'),
+    ("chao_loja", '$'),
+    ("chao_secreto", 's'),
+    ("chao_inicio", 'S'),
+];
+
+/// Isaac: rooms on a grid, doors between neighbours, roles by graph
+/// distance: tests/pipelines/isaac.json.
+#[test]
+fn isaac_floor() {
+    insta::assert_snapshot!(terrain_of(
+        include_str!("pipelines/isaac.json"),
+        DUNGEON_GLYPHS
+    ));
+}
+
+/// Rooms at random joined by the shortest tree plus loops:
+/// tests/pipelines/masmorra.json.
+#[test]
+fn classic_dungeon() {
+    insta::assert_snapshot!(terrain_of(
+        include_str!("pipelines/masmorra.json"),
+        DUNGEON_GLYPHS
+    ));
+}
+
 /// Noise, falloff and bands: tests/pipelines/ilha.json.
 #[test]
 fn island_from_noise() {

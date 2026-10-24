@@ -98,18 +98,22 @@ fn the_dispatch_names_every_operator() {
     assert_eq!(
         step["properties"]["operator"]["enum"],
         json!([
+            "AssignRooms",
             "CellularAutomaton",
             "Classify",
+            "ConnectRooms",
             "Falloff",
             "Fill",
             "FillBorder",
             "FillSmallRegions",
             "KeepLargestRegion",
             "Noise",
+            "PlaceRooms",
+            "RoomGrid",
             "Scatter"
         ])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 9);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 13);
 }
 
 const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");

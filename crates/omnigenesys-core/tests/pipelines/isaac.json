@@ -1,0 +1,98 @@
+{
+  "version": 2,
+  "description": "Andar estilo Isaac",
+  "seed": 512,
+  "size": {
+    "width": 135,
+    "height": 72
+  },
+  "layers": [
+    "terreno",
+    {
+      "name": "salas",
+      "kind": "objects"
+    },
+    {
+      "name": "conexoes",
+      "kind": "objects"
+    }
+  ],
+  "tiles": [
+    "chao",
+    "parede",
+    "porta",
+    "porta_secreta",
+    "chao_chefe",
+    "chao_tesouro",
+    "chao_loja",
+    "chao_secreto",
+    "chao_inicio"
+  ],
+  "steps": [
+    {
+      "id": "andar",
+      "operator": "RoomGrid",
+      "config": {
+        "layer": "terreno",
+        "rooms": "salas",
+        "floor": "chao",
+        "wall": "parede",
+        "count": 12,
+        "dead_ends": 4,
+        "secret": true
+      }
+    },
+    {
+      "id": "portas",
+      "operator": "ConnectRooms",
+      "config": {
+        "rooms": "salas",
+        "connections": "conexoes",
+        "layer": "terreno",
+        "floor": "chao",
+        "door": "porta",
+        "secret_door": "porta_secreta",
+        "strategy": "adjacent"
+      }
+    },
+    {
+      "id": "papeis",
+      "operator": "AssignRooms",
+      "config": {
+        "rooms": "salas",
+        "connections": "conexoes",
+        "layer": "terreno",
+        "floor": "chao",
+        "roles": [
+          {
+            "role": "start",
+            "pick": "first",
+            "tile": "chao_inicio"
+          },
+          {
+            "role": "boss",
+            "pick": "farthest",
+            "dead_end": true,
+            "tile": "chao_chefe"
+          },
+          {
+            "role": "treasure",
+            "pick": "random",
+            "dead_end": true,
+            "tile": "chao_tesouro"
+          },
+          {
+            "role": "shop",
+            "pick": "random",
+            "dead_end": true,
+            "tile": "chao_loja"
+          },
+          {
+            "role": "secret",
+            "tile": "chao_secreto"
+          }
+        ]
+      }
+    }
+  ]
+}

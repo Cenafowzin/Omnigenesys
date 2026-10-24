@@ -220,14 +220,18 @@ fn schema_and_operators_go_to_stdout() {
     let o = mapgen(&["operators"]);
     assert_eq!(
         stdout(&o),
-        "CellularAutomaton  2d     local\n\
+        "AssignRooms        2d/3d  global\n\
+         CellularAutomaton  2d     local\n\
          Classify           2d/3d  local\n\
+         ConnectRooms       2d     global\n\
          Falloff            2d/3d  local\n\
          Fill               2d/3d  local\n\
          FillBorder         2d     local\n\
          FillSmallRegions   2d/3d  local\n\
          KeepLargestRegion  2d/3d  global\n\
          Noise              2d     local\n\
+         PlaceRooms         2d     global\n\
+         RoomGrid           2d     global\n\
          Scatter            2d/3d  local\n"
     );
 }

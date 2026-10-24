@@ -15,8 +15,9 @@ use crate::{
     access::{Access, Reach, ReadHandle, WriteHandle},
     bounds::Bounds,
     condition::{CompiledCondition, Condition, ConditionError, PreparedCondition},
-    grid::{Grid, GridError, LayerId},
+    grid::{Grid, GridError, LayerId, Split},
     layer::{Layer, LayerKind, OutOfBounds},
+    object::ObjectLayer,
     rng::StepRng,
     tile::{TileError, TileId, TileRegistry},
 };
@@ -230,6 +231,11 @@ impl<'a> BuildContext<'a> {
         bcx
     }
 
+    /// The map the pipeline is built for.
+    pub fn bounds(&self) -> Bounds {
+        self.grid.bounds()
+    }
+
     /// Whether the map is 2D (depth 1).
     pub fn is_2d(&self) -> bool {
         self.grid.bounds().size.is_2d()
@@ -298,6 +304,22 @@ impl<'a> BuildContext<'a> {
         let id = self.layer_of(layer, LayerKind::Scalar)?;
         let reach = self.normalize(reach);
         self.access.add_snapshot_read(id, reach);
+        self.access.add_write(id, Reach::ZERO);
+        Ok(WriteHandle { layer: id })
+    }
+
+    /// Declares a read of the object layer `layer` (rooms placed by an
+    /// earlier step).
+    pub fn read_objects(&mut self, layer: &str) -> Result<ReadHandle, BuildError> {
+        let id = self.layer_of(layer, LayerKind::Objects)?;
+        self.access.add_read(id, Reach::ZERO);
+        Ok(ReadHandle { layer: id })
+    }
+
+    /// Declares that the step adds objects to (or changes objects of) the
+    /// object layer `layer`.
+    pub fn write_objects(&mut self, layer: &str) -> Result<WriteHandle, BuildError> {
+        let id = self.layer_of(layer, LayerKind::Objects)?;
         self.access.add_write(id, Reach::ZERO);
         Ok(WriteHandle { layer: id })
     }
@@ -423,9 +445,16 @@ pub struct GridView<'c> {
 }
 
 impl GridView<'_> {
-    /// The cells this run decides.
+    /// The cells this run decides: the whole map, or a chunk of it.
     pub fn region(&self) -> Bounds {
         self.grid.bounds()
+    }
+
+    /// The whole map, which a chunk is part of. Use it for anything that
+    /// depends on where the map ends (a border, a falloff toward the
+    /// edges), so every chunk agrees.
+    pub fn map(&self) -> Bounds {
+        self.grid.map()
     }
 
     pub fn tiles(&self, h: ReadHandle) -> Result<&Layer<TileId>, OpError> {
@@ -454,6 +483,36 @@ impl GridView<'_> {
             return Err(OpError::Undeclared { layer: h.layer });
         }
         Ok(self.grid.scalars_mut(h.layer)?)
+    }
+
+    pub fn objects(&self, h: ReadHandle) -> Result<&ObjectLayer, OpError> {
+        if !self.access.reads_live(h.layer) {
+            return Err(OpError::Undeclared { layer: h.layer });
+        }
+        Ok(self.grid.objects(h.layer)?)
+    }
+
+    /// Several layers at once, as declared: `reads` shared, `writes`
+    /// exclusive, and the map's object id counter. Each comes back as an
+    /// [`AnyLayer`] to take apart (`as_tiles_mut`, `as_objects_mut`).
+    pub fn split(
+        &mut self,
+        reads: &[ReadHandle],
+        writes: &[WriteHandle],
+    ) -> Result<Split<'_>, OpError> {
+        for h in reads {
+            if !self.access.reads_live(h.layer) {
+                return Err(OpError::Undeclared { layer: h.layer });
+            }
+        }
+        for h in writes {
+            if !self.access.writes(h.layer) {
+                return Err(OpError::Undeclared { layer: h.layer });
+            }
+        }
+        let r: Vec<LayerId> = reads.iter().map(|h| h.layer).collect();
+        let w: Vec<LayerId> = writes.iter().map(|h| h.layer).collect();
+        Ok(self.grid.split(&r, &w)?)
     }
 
     /// One layer read and another written, at once: a scalar operator

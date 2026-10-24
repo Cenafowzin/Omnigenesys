@@ -16,6 +16,9 @@ const CAVE: &str = include_str!("../../omnigenesys-core/tests/pipelines/cave.jso
 // The file includes every height as written (f32, shortest decimal).
 const ISLAND_NOISE: &str = include_str!("../../omnigenesys-core/tests/pipelines/ilha.json");
 const ARCHIPELAGO: &str = include_str!("../../omnigenesys-core/tests/pipelines/arquipelago.json");
+// Objects: rooms and connections, with ids and typed props, in the file.
+const ISAAC: &str = include_str!("../../omnigenesys-core/tests/pipelines/isaac.json");
+const DUNGEON: &str = include_str!("../../omnigenesys-core/tests/pipelines/masmorra.json");
 
 /// A 3D map through every operator that runs in 3D.
 const VOLUME: &str = r#"{
@@ -45,11 +48,11 @@ fn fingerprint(text: &str) -> u64 {
         match map.layer(&name) {
             Some(ids) => ids.iter().for_each(|id| eat(&id.to_le_bytes())),
             // A scalar layer: its exact bits, not just its text.
-            None => map
-                .scalar(&name)
-                .unwrap()
-                .iter()
-                .for_each(|v| eat(&v.to_bits().to_le_bytes())),
+            None => {
+                if let Some(values) = map.scalar(&name) {
+                    values.iter().for_each(|v| eat(&v.to_bits().to_le_bytes()));
+                }
+            }
         }
     }
     h
@@ -83,4 +86,16 @@ fn island_from_noise() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn archipelago() {
     assert_eq!(fingerprint(ARCHIPELAGO), 14_932_835_501_811_789_232);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn isaac_floor() {
+    assert_eq!(fingerprint(ISAAC), 2_971_879_752_968_153_115);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn classic_dungeon() {
+    assert_eq!(fingerprint(DUNGEON), 926_442_635_239_489_141);
 }

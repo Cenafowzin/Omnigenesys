@@ -39,6 +39,7 @@ use thiserror::Error;
 use crate::{
     grid::{Grid, GridError},
     layer::LayerKind,
+    object::{Object, Value},
     spec::ParamValue,
     tile::{TileId, TileRegistry},
 };
@@ -93,6 +94,8 @@ pub enum ExportError {
     },
     #[error("param '{name}' is {value}, which JSON cannot hold")]
     NonFiniteParam { name: String, value: f64 },
+    #[error("object {object} has a property '{name}' that JSON cannot hold (NaN or infinite)")]
+    NonFiniteProp { object: u32, name: String },
     #[error("layer '{layer}' has {value} at cell {index}, which JSON cannot hold")]
     NonFiniteCell {
         layer: String,
@@ -167,9 +170,23 @@ pub fn write_json<W: Write>(
         w.layer(layer)?;
     }
     w.raw(if layers.is_empty() { "]" } else { "\n  ]" });
+    w.raw(",\n  \"objects\": [");
+    let mut first = true;
+    for name in grid.names() {
+        let id = grid.layer_id(name)?;
+        if grid.kind(id)? != LayerKind::Objects {
+            continue;
+        }
+        for o in grid.objects(id)?.iter() {
+            w.raw(if first { "\n    " } else { ",\n    " });
+            first = false;
+            w.object(name, o)?;
+        }
+    }
+    w.raw(if first { "]" } else { "\n  ]" });
     // Not produced by any operator yet; present so readers can rely on
     // the shape now.
-    w.raw(",\n  \"objects\": [],\n  \"markers\": []\n}\n");
+    w.raw(",\n  \"markers\": []\n}\n");
     w.finish()?;
     Ok(())
 }
@@ -202,6 +219,9 @@ fn plan<'g>(
     let mut layers = Vec::new();
     for name in grid.names() {
         let id = grid.layer_id(name)?;
+        if grid.kind(id)? == LayerKind::Objects {
+            continue;
+        }
         if grid.kind(id)? == LayerKind::Scalar {
             let cells = grid.scalars(id)?.as_slice();
             if let Some(i) = cells.iter().position(|v| !v.is_finite()) {
@@ -319,6 +339,86 @@ impl<W: Write> Writer<W> {
         self.raw(", ");
         self.int(c);
         self.raw("]");
+    }
+
+    /// One object: `{"id", "type", "layer", "bbox": [x, y, z, w, h, d],
+    /// "props": {"name": {"type", "value"}}}`, props in the order set.
+    fn object(&mut self, layer: &str, o: &Object) -> Result<(), ExportError> {
+        self.raw("{\"id\": ");
+        self.int(o.id.get());
+        self.raw(", \"type\": ");
+        self.string(&o.kind);
+        self.raw(", \"layer\": ");
+        self.string(layer);
+        let b = o.bbox;
+        self.raw(", \"bbox\": [");
+        self.int(b.origin.x);
+        self.raw(", ");
+        self.int(b.origin.y);
+        self.raw(", ");
+        self.int(b.origin.z);
+        self.raw(", ");
+        self.int(b.size.width);
+        self.raw(", ");
+        self.int(b.size.height);
+        self.raw(", ");
+        self.int(b.size.depth);
+        self.raw("], \"props\": {");
+        for (i, (name, value)) in o.props.iter().enumerate() {
+            if i > 0 {
+                self.raw(", ");
+            }
+            self.string(name);
+            self.raw(": ");
+            self.value(o, name, value)?;
+        }
+        self.raw("}}");
+        Ok(())
+    }
+
+    /// `{"type": ..., "value": ...}`: the type spelled out, as Tiled and
+    /// LDtk write properties, so 48 stays an integer for the adapter.
+    fn value(&mut self, o: &Object, name: &str, v: &Value) -> Result<(), ExportError> {
+        let (ty, _) = match v {
+            Value::Int(_) => ("int", ()),
+            Value::Float(_) => ("float", ()),
+            Value::Bool(_) => ("bool", ()),
+            Value::Str(_) => ("string", ()),
+            Value::Cell(_) => ("cell", ()),
+            Value::Object(_) => ("object", ()),
+            Value::List(_) => ("list", ()),
+        };
+        self.raw("{\"type\": \"");
+        self.raw(ty);
+        self.raw("\", \"value\": ");
+        match v {
+            Value::Int(n) => self.int(*n),
+            Value::Float(f) => {
+                if !f.is_finite() {
+                    return Err(ExportError::NonFiniteProp {
+                        object: o.id.get(),
+                        name: name.to_string(),
+                    });
+                }
+                self.param(&ParamValue::Number(*f));
+            }
+            Value::Bool(b) => self.raw(if *b { "true" } else { "false" }),
+            Value::Str(s) => self.string(s),
+            Value::Cell(c) => self.triple(c.x, c.y, c.z),
+            Value::Object(id) => self.int(id.get()),
+            Value::List(items) => {
+                self.raw("[");
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        self.raw(", ");
+                    }
+                    self.value(o, name, item)?;
+                }
+                self.raw("]");
+            }
+        }
+        self.raw("}");
+        Ok(())
     }
 
     /// A param value. A float is written by Rust's own formatting, not
