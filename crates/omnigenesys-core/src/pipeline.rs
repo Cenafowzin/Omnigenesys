@@ -168,7 +168,7 @@ fn build_step(
         };
         Some(all.compile(grid, tiles)?)
     };
-    let mut bcx = BuildContext::new(grid, tiles, conditions);
+    let mut bcx = BuildContext::new(grid, tiles, conditions, entry.scope);
     let operator = (entry.factory)(spec.config.clone(), &mut bcx)?;
     let access = bcx.finish(&spec.operator)?;
     Ok(CompiledStep {

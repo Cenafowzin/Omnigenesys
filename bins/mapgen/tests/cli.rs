@@ -222,15 +222,14 @@ fn schema_and_operators_go_to_stdout() {
         stdout(&o),
         "AssignRooms        2d/3d  global\n\
          CellularAutomaton  2d     local\n\
-         Classify           2d/3d  local\n\
+         Check              2d/3d  global\n\
+         Combine            2d/3d  local\n\
          ConnectRooms       2d     global\n\
-         Falloff            2d/3d  local\n\
          Fill               2d/3d  local\n\
-         FillBorder         2d     local\n\
-         FillSmallRegions   2d/3d  local\n\
-         KeepLargestRegion  2d/3d  global\n\
+         Gradient           2d/3d  local\n\
          Noise              2d     local\n\
          PlaceRooms         2d     global\n\
+         RegionSize         2d/3d  global\n\
          RoomGrid           2d     global\n\
          Scatter            2d/3d  local\n"
     );

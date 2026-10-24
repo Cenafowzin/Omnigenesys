@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Ilha: noise fBm puxado para baixo nas bordas por um falloff redondo, pintado por faixas de altura.",
+  "description": "Ilha: noise fBm puxado para baixo nas bordas por um gradiente redondo, pintado por faixas de altura.",
   "seed": 512,
   "size": {
     "width": 64,
@@ -10,6 +10,10 @@
     "terreno",
     {
       "name": "altura",
+      "kind": "scalar"
+    },
+    {
+      "name": "distancia",
       "kind": "scalar"
     }
   ],
@@ -32,46 +36,121 @@
       }
     },
     {
-      "id": "costa",
-      "operator": "Falloff",
+      "id": "centro",
+      "operator": "Gradient",
+      "description": "1 no centro do mapa, 0 nas bordas.",
       "config": {
-        "layer": "altura",
+        "layer": "distancia",
         "shape": "round",
-        "mix": 0.55
+        "invert": true
       }
     },
     {
-      "id": "biomas",
-      "operator": "Classify",
+      "id": "costa",
+      "operator": "Combine",
+      "description": "Puxa a altura em direção ao gradiente: alta no centro, baixa nas bordas.",
       "config": {
-        "from": "altura",
-        "layer": "terreno",
-        "bands": [
-          {
-            "max": 0.42,
-            "tile": "mar"
-          },
-          {
-            "max": 0.45,
-            "tile": "areia"
-          },
-          {
-            "max": 0.58,
-            "tile": "grama"
-          },
-          {
-            "max": 0.68,
-            "tile": "mata"
-          },
-          {
-            "max": 0.78,
-            "tile": "pedra"
-          },
-          {
-            "tile": "neve"
-          }
-        ]
+        "a": "altura",
+        "b": "distancia",
+        "op": "lerp",
+        "mix": 0.55,
+        "layer": "altura",
+        "clamp": true
       }
+    },
+    {
+      "id": "mar",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "mar"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "max": 0.42
+        }
+      ]
+    },
+    {
+      "id": "praia",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "areia"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.42,
+          "max": 0.45
+        }
+      ]
+    },
+    {
+      "id": "campo",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "grama"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.45,
+          "max": 0.58
+        }
+      ]
+    },
+    {
+      "id": "mata",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "mata"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.58,
+          "max": 0.68
+        }
+      ]
+    },
+    {
+      "id": "pedra",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "pedra"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.68,
+          "max": 0.78
+        }
+      ]
+    },
+    {
+      "id": "neve",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "neve"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.78
+        }
+      ]
     }
   ]
 }

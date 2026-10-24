@@ -43,7 +43,7 @@ fn reach_union_takes_the_larger_side_of_each_axis() {
 #[test]
 fn reads_and_writes_are_recorded_with_their_reach() {
     let w = world(4);
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     let r = bcx.read("terrain", Reach::uniform(2)).unwrap();
     let _ = bcx.read("terrain", Reach::symmetric(3, 0, 0)).unwrap();
     let o = bcx.write("objects").unwrap();
@@ -60,7 +60,7 @@ fn reads_and_writes_are_recorded_with_their_reach() {
 #[test]
 fn a_2d_map_drops_the_z_reach() {
     let w = world(1);
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     bcx.read("terrain", Reach::uniform(2)).unwrap();
     let access = bcx.finish("Test").unwrap();
     let terrain = w.grid.layer_id("terrain").unwrap();
@@ -70,7 +70,7 @@ fn a_2d_map_drops_the_z_reach() {
 #[test]
 fn condition_reads_join_the_access_with_their_distance() {
     let w = world(4);
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     bcx.condition(&condition(
         r#"{"type": "all", "conditions": [
             {"type": "tile_is", "layer": "terrain", "tile": "floor"},
@@ -90,7 +90,7 @@ fn condition_reads_join_the_access_with_their_distance() {
 #[test]
 fn unknown_names_are_build_errors() {
     let w = world(1);
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     assert_eq!(
         bcx.write("terain").unwrap_err(),
         BuildError::Grid(GridError::LayerNotFound {
@@ -108,7 +108,7 @@ fn unknown_names_are_build_errors() {
 #[test]
 fn reading_around_a_cell_and_writing_the_same_layer_is_a_conflict() {
     let w = world(1);
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     bcx.read("terrain", Reach::uniform(1)).unwrap();
     bcx.write("terrain").unwrap();
     assert_eq!(
@@ -122,7 +122,7 @@ fn reading_around_a_cell_and_writing_the_same_layer_is_a_conflict() {
 #[test]
 fn reading_the_cell_itself_and_writing_it_is_fine() {
     let w = world(1);
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     bcx.read("terrain", Reach::ZERO).unwrap();
     bcx.write("terrain").unwrap();
     assert!(bcx.finish("Swap").is_ok());
@@ -135,7 +135,7 @@ fn conditions_on_the_written_layer_are_fine() {
     let w = world(1);
     let c =
         condition(r#"{"type": "near_type", "layer": "terrain", "tile": "wall", "distance": 2}"#);
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     bcx.condition(&c).unwrap();
     bcx.write("terrain").unwrap();
     assert!(bcx.finish("Grow").is_ok());
@@ -148,7 +148,7 @@ fn step_conditions_must_be_taken_by_the_operator() {
         .compile(&w.grid, &w.tiles)
         .unwrap();
 
-    let ignored = BuildContext::new(&w.grid, &w.tiles, Some(c.clone()));
+    let ignored = BuildContext::new(&w.grid, &w.tiles, Some(c.clone()), Scope::Local);
     assert_eq!(
         ignored.finish("Deaf").unwrap_err(),
         BuildError::ConditionsNotSupported {
@@ -156,7 +156,7 @@ fn step_conditions_must_be_taken_by_the_operator() {
         }
     );
 
-    let mut taken = BuildContext::new(&w.grid, &w.tiles, Some(c.clone()));
+    let mut taken = BuildContext::new(&w.grid, &w.tiles, Some(c.clone()), Scope::Local);
     assert_eq!(taken.step_conditions(), Some(c));
     let access = taken.finish("Listens").unwrap();
     // The step conditions' reads are part of the access either way.
@@ -170,10 +170,10 @@ fn step_conditions_must_be_taken_by_the_operator() {
 fn a_handle_from_another_step_is_refused() {
     let mut w = world(1);
     // Step A declares a write to "terrain"; step B declares nothing.
-    let mut a = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut a = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     let handle = a.write("terrain").unwrap();
     let read = a.read("objects", Reach::ZERO).unwrap();
-    let b_access = BuildContext::new(&w.grid, &w.tiles, None)
+    let b_access = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local)
         .finish("B")
         .unwrap();
 
@@ -224,7 +224,7 @@ fn build_nop(config: serde_json::Value) -> Result<(), BuildError> {
     let w = world(1);
     let mut r = Registry::new();
     r.register::<Nop>().unwrap();
-    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None);
+    let mut bcx = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
     (r.get("Nop").unwrap().factory)(config, &mut bcx).map(|_| ())
 }
 

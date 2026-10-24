@@ -17,33 +17,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
-    condition::TileSpec,
     coords::GridSize,
-    operator::{BuildContext, BuildError},
     tile::{TileId, TileSet},
 };
-
-/// The region's tiles and the fill tile, resolved; the fill must not be one
-/// of them, or filling would change nothing.
-pub(super) fn resolve(
-    bcx: &BuildContext<'_>,
-    region: &TileSpec,
-    fill: &str,
-) -> Result<(TileSet, TileId), BuildError> {
-    let ids = region
-        .names()
-        .iter()
-        .map(|name| bcx.tile(name))
-        .collect::<Result<Vec<_>, _>>()?;
-    let fill_id = bcx.tile(fill)?;
-    if ids.contains(&fill_id) {
-        return Err(BuildError::Invalid {
-            field: "fill".to_string(),
-            message: format!("'{fill}' is one of the region's own tiles"),
-        });
-    }
-    Ok((TileSet::new(&ids), fill_id))
-}
 
 use super::bits::pack;
 
@@ -170,31 +146,24 @@ impl Regions {
         }
     }
 
-    /// The root and size of the largest region; on a tie, the first one in
-    /// scan order. `None` when there is no region cell at all.
-    pub(super) fn largest(&self) -> Option<(u32, u64)> {
-        let mut best: Option<(u32, u64)> = None;
-        for (root, &size) in self.size.iter().enumerate() {
-            if size > best.map_or(0, |b| b.1) {
-                best = Some((root as u32, size));
-            }
-        }
-        best
+    /// Every region: its root and its size, in scan order.
+    pub(super) fn roots(&self) -> impl Iterator<Item = (u32, u64)> + '_ {
+        self.size
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| **s > 0)
+            .map(|(r, s)| (r as u32, *s))
     }
 
-    pub(super) fn size_of(&self, root: u32) -> u64 {
-        self.size[root as usize]
-    }
-
-    /// Sets to `tile` the cells of every region `fill` says yes to, given
-    /// its root.
-    pub(super) fn fill(&self, cells: &mut [TileId], tile: TileId, fill: impl Fn(u32) -> bool) {
+    /// Writes into `cells` (the layer, in its order) the value `value`
+    /// gives each region by its root, over the region's cells only.
+    pub(super) fn paint<T: Copy>(&self, cells: &mut [T], value: impl Fn(u32) -> Option<T>) {
         for (r, bounds) in self.rows.windows(2).enumerate() {
             let row = r * self.width;
             for i in bounds[0] as usize..bounds[1] as usize {
-                if fill(self.root[i]) {
+                if let Some(v) = value(self.root[i]) {
                     let Run { start, end } = self.runs[i];
-                    cells[row + start as usize..row + end as usize].fill(tile);
+                    cells[row + start as usize..row + end as usize].fill(v);
                 }
             }
         }

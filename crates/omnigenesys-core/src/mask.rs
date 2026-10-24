@@ -45,11 +45,32 @@ impl CellMask {
         w.finish()
     }
 
-    /// True where `min <= value <= max`; NaN is never in range.
+    /// True where `min <= value < max`; NaN is never in range.
     pub(crate) fn from_scalars(layer: &Layer<f32>, min: f32, max: f32) -> CellMask {
         let mut w = MaskWriter::new(layer.bounds());
         for &v in layer.cells() {
-            w.push(v >= min && v <= max);
+            w.push(v >= min && v < max);
+        }
+        w.finish()
+    }
+
+    /// True over `region` where the distance to the nearest edge of `map`
+    /// is in `min..=max`; z counts only when the map has depth.
+    pub(crate) fn from_edge_distance(region: Bounds, map: Bounds, min: u32, max: u32) -> CellMask {
+        let lo = |o: i32| i64::from(o);
+        let hi = |o: i32, n: u32| i64::from(o) + i64::from(n) - 1;
+        let (x0, x1) = (lo(map.origin.x), hi(map.origin.x, map.size.width));
+        let (y0, y1) = (lo(map.origin.y), hi(map.origin.y, map.size.height));
+        let (z0, z1) = (lo(map.origin.z), hi(map.origin.z, map.size.depth));
+        let flat = map.size.depth <= 1;
+        let mut w = MaskWriter::new(region);
+        for c in region.iter() {
+            let (x, y, z) = (i64::from(c.x), i64::from(c.y), i64::from(c.z));
+            let mut d = (x - x0).min(x1 - x).min(y - y0).min(y1 - y);
+            if !flat {
+                d = d.min(z - z0).min(z1 - z);
+            }
+            w.push(d >= i64::from(min) && d <= i64::from(max));
         }
         w.finish()
     }

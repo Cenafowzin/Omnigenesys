@@ -1,5 +1,7 @@
-//! KeepLargestRegion and FillSmallRegions, against a breadth-first search
-//! written the obvious way.
+//! RegionSize, against a breadth-first search written the obvious way —
+//! through the two recipes it exists for: keep the largest region (rank,
+//! then `Fill` where the rank is 2 or more) and fill the small ones (size
+//! with a cap, then `Fill` where the size is under it).
 
 use std::collections::VecDeque;
 
@@ -12,8 +14,8 @@ use crate::{
     coords::{Coord, GridSize},
     grid::Grid,
     layer::LayerKind,
-    operator::{BuildError, OpError, Registry, Scope},
-    pipeline::{Pipeline, StepError, StepSpec},
+    operator::{BuildError, Registry, Scope},
+    pipeline::{Pipeline, StepSpec},
     tile::{TileId, TileRegistry},
 };
 
@@ -29,6 +31,8 @@ struct World {
 fn world(origin: Coord, size: GridSize) -> World {
     let mut grid = Grid::new(Bounds::new(origin, size));
     grid.add_layer("terrain", LayerKind::Tiles).unwrap();
+    grid.add_layer("size", LayerKind::Scalar).unwrap();
+    grid.add_layer("rank", LayerKind::Scalar).unwrap();
     World {
         grid,
         tiles: tiles(),
@@ -86,14 +90,16 @@ impl World {
             .collect()
     }
 
-    fn try_run(&mut self, steps: &[StepSpec]) -> Result<(), StepError<OpError>> {
+    fn run(&mut self, steps: &[StepSpec]) {
         Pipeline::build(&Registry::with_builtins(), &self.grid, &self.tiles, steps)
             .unwrap()
             .run(&mut self.grid, "", 1)
+            .unwrap();
     }
 
-    fn run(&mut self, steps: &[StepSpec]) {
-        self.try_run(steps).unwrap();
+    fn scalars(&self, layer: &str) -> Vec<f32> {
+        let id = self.grid.layer_id(layer).unwrap();
+        self.grid.scalars(id).unwrap().as_slice().to_vec()
     }
 
     fn build_error(&self, steps: &[StepSpec]) -> BuildError {
@@ -105,30 +111,53 @@ impl World {
     }
 }
 
-fn step(operator: &str, config: Value) -> StepSpec {
+fn step(config: Value) -> StepSpec {
     StepSpec {
         id: "regions".to_string(),
-        operator: operator.to_string(),
+        operator: "RegionSize".to_string(),
         enabled: true,
         config,
         conditions: Vec::new(),
     }
 }
 
-fn keep(region: Value, connectivity: &str) -> StepSpec {
-    step(
-        "KeepLargestRegion",
-        json!({"layer": "terrain", "region": region, "fill": "wall",
-               "connectivity": connectivity}),
-    )
+/// Wall where the scalar layer `layer` is in `min..max`.
+fn wall_where(layer: &str, min: f64, max: Option<f64>) -> StepSpec {
+    StepSpec {
+        id: "paint".to_string(),
+        operator: "Fill".to_string(),
+        enabled: true,
+        config: json!({"layer": "terrain", "tile": "wall"}),
+        conditions: vec![
+            serde_json::from_value(
+                json!({"type": "scalar_in_range", "layer": layer, "min": min, "max": max}),
+            )
+            .unwrap(),
+        ],
+    }
 }
 
-fn fill_small(region: Value, connectivity: &str, below: u32) -> StepSpec {
-    step(
-        "FillSmallRegions",
-        json!({"layer": "terrain", "region": region, "fill": "wall",
-               "connectivity": connectivity, "below": below}),
-    )
+/// Every region but the largest becomes wall.
+fn keep(region: Value, connectivity: &str) -> [StepSpec; 2] {
+    [
+        step(
+            json!({"from": "terrain", "region": region, "connectivity": connectivity,
+                    "layer": "size", "rank": "rank"}),
+        ),
+        wall_where("rank", 2.0, None),
+    ]
+}
+
+/// Every region under `below` cells becomes wall (`below` at least 2: a
+/// region under 1 cell is no region, and the range would be empty).
+fn fill_small(region: Value, connectivity: &str, below: u32) -> [StepSpec; 2] {
+    [
+        step(
+            json!({"from": "terrain", "region": region, "connectivity": connectivity,
+                    "layer": "size", "cap": below}),
+        ),
+        wall_where("size", 1.0, Some(f64::from(below))),
+    ]
 }
 
 /// The regions of `cells` by breadth-first search from each unvisited
@@ -240,13 +269,18 @@ fn both_agree_with_a_breadth_first_search_on_random_maps() {
                     let (label, sizes) = bfs(&start, size, &region, connectivity == "diagonal");
                     let context = format!("{w}x{h}x{d} {connectivity} {names:?}");
 
-                    // Largest: the first of the largest in scan order stays.
+                    // Largest: the first of the largest in scan order stays;
+                    // with no region, nothing changes.
                     a.paint(&start);
-                    let result = a.try_run(&[keep(spec.clone(), connectivity)]);
+                    a.run(&keep(spec.clone(), connectivity));
+                    let expected_size: Vec<f32> = label
+                        .iter()
+                        .map(|l| l.map_or(0.0, |l| sizes[l] as f32))
+                        .collect();
+                    assert_eq!(a.scalars("size"), expected_size, "{context}: sizes");
                     match sizes.iter().max() {
-                        None => assert!(result.is_err(), "{context}: no region"),
+                        None => assert_eq!(a.cells(), start, "{context}: no region"),
                         Some(&max) => {
-                            result.unwrap();
                             let winner = sizes.iter().position(|&s| s == max).unwrap();
                             let expected: Vec<TileId> = start
                                 .iter()
@@ -261,10 +295,10 @@ fn both_agree_with_a_breadth_first_search_on_random_maps() {
                     }
 
                     // Small: every region under `below` goes.
-                    let below = 1 + dice.below(30) as u32;
+                    let below = 2 + dice.below(29) as u32;
                     let mut b = world(Coord::new(3, -4, 0), size);
                     b.paint(&start);
-                    b.run(&[fill_small(spec.clone(), connectivity, below)]);
+                    b.run(&fill_small(spec.clone(), connectivity, below));
                     let expected: Vec<TileId> = start
                         .iter()
                         .zip(&label)
@@ -286,14 +320,14 @@ fn both_agree_with_a_breadth_first_search_on_random_maps() {
 fn a_tie_keeps_the_first_region_in_scan_order() {
     let mut w = world(Coord::ZERO, GridSize::new(7, 3, 1));
     w.draw(&["#..#..#", "#..#..#", "#######"]);
-    w.run(&[keep(json!("floor"), "orthogonal")]);
+    w.run(&keep(json!("floor"), "orthogonal"));
     assert_eq!(w.picture(), ["#..####", "#..####", "#######"]);
 
     // Three cells each, and the right region's first cell comes first in
     // scan order here.
     let mut w = world(Coord::ZERO, GridSize::new(7, 3, 1));
     w.draw(&["####..#", "#..##.#", "#.#####"]);
-    w.run(&[keep(json!("floor"), "orthogonal")]);
+    w.run(&keep(json!("floor"), "orthogonal"));
     assert_eq!(w.picture(), ["####..#", "#####.#", "#######"]);
 }
 
@@ -302,13 +336,13 @@ fn diagonal_joins_corners_and_orthogonal_does_not() {
     let rows = [".#.", "#.#", "..#"];
     let mut w = world(Coord::ZERO, GridSize::new(3, 3, 1));
     w.draw(&rows);
-    w.run(&[keep(json!("floor"), "orthogonal")]);
+    w.run(&keep(json!("floor"), "orthogonal"));
     // Orthogonal: three regions; the bottom one (3 cells) wins.
     assert_eq!(w.picture(), ["###", "#.#", "..#"]);
 
     let mut w = world(Coord::ZERO, GridSize::new(3, 3, 1));
     w.draw(&rows);
-    w.run(&[keep(json!("floor"), "diagonal")]);
+    w.run(&keep(json!("floor"), "diagonal"));
     assert_eq!(w.picture(), rows);
 }
 
@@ -321,9 +355,9 @@ fn diagonal_in_3d_reaches_across_a_corner_of_the_cube() {
     cells[0] = floor; // (0, 0, 0)
     cells[7] = floor; // (1, 1, 1)
     w.paint(&cells);
-    w.run(&[fill_small(json!("floor"), "diagonal", 2)]);
+    w.run(&fill_small(json!("floor"), "diagonal", 2));
     assert_eq!(w.cells(), cells, "one region of 2: kept");
-    w.run(&[fill_small(json!("floor"), "orthogonal", 2)]);
+    w.run(&fill_small(json!("floor"), "orthogonal", 2));
     assert_eq!(w.cells(), vec![wall; 8], "two regions of 1: filled");
 }
 
@@ -335,7 +369,7 @@ fn small_regions_decide_the_same_in_any_window() {
     let mut dice = Dice(19);
     for (size, below) in [
         (GridSize::new(70, 50, 1), 6),
-        (GridSize::new(70, 50, 1), 1),
+        (GridSize::new(70, 50, 1), 2),
         (GridSize::new(20, 18, 12), 5),
     ] {
         for connectivity in ["orthogonal", "diagonal"] {
@@ -343,7 +377,7 @@ fn small_regions_decide_the_same_in_any_window() {
             let start = noise(&mut dice, &tiles, size.len());
             let mut whole = world(Coord::ZERO, size);
             whole.paint(&start);
-            whole.run(&[fill_small(json!("floor"), connectivity, below)]);
+            whole.run(&fill_small(json!("floor"), connectivity, below));
             let at = |c: Coord| {
                 let i = (c.z as u32 * size.height + c.y as u32) * size.width + c.x as u32;
                 i as usize
@@ -383,7 +417,7 @@ fn small_regions_decide_the_same_in_any_window() {
                 let cells: Vec<TileId> = window.iter().map(|c| start[at(c)]).collect();
                 let mut part = world(window.origin, window.size);
                 part.paint(&cells);
-                part.run(&[fill_small(json!("floor"), connectivity, below)]);
+                part.run(&fill_small(json!("floor"), connectivity, below));
                 let got = part.cells();
                 for (i, c) in window.iter().enumerate() {
                     if inner.contains(c) {
@@ -400,30 +434,29 @@ fn small_regions_decide_the_same_in_any_window() {
 }
 
 #[test]
-fn failures_are_step_errors() {
-    let mut w = world(Coord::ZERO, GridSize::new(4, 4, 1));
-    w.draw(&["####", "#..#", "####", "####"]);
-    let e = w
-        .try_run(&[keep(json!("water"), "orthogonal")])
-        .unwrap_err();
-    assert_eq!(
-        e.error.to_string(),
-        "layer 'terrain' has no cell of the region"
-    );
+fn rank_counts_from_the_largest_and_ties_go_to_scan_order() {
+    let mut w = world(Coord::ZERO, GridSize::new(7, 3, 1));
+    w.draw(&["#..#.##", "#..#.#.", "#####.."]);
+    w.run(&keep(json!("floor"), "orthogonal")[..1]);
+    // Sizes 4, 2, 3: ranks 1, 3, 2; walls are 0 for both.
+    #[rustfmt::skip]
+    assert_eq!(w.scalars("rank"), [
+        0.0, 1.0, 1.0, 0.0, 3.0, 0.0, 0.0,
+        0.0, 1.0, 1.0, 0.0, 3.0, 0.0, 2.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0,
+    ]);
+}
 
-    let e = w
-        .try_run(&[step(
-            "KeepLargestRegion",
-            json!({"layer": "terrain", "region": "floor", "fill": "wall",
-                   "connectivity": "orthogonal", "min_cells": 3}),
-        )])
-        .unwrap_err();
-    assert_eq!(
-        e.error.to_string(),
-        "the largest region has 2 cells, fewer than min_cells (3)"
-    );
-    // A failed step writes nothing.
-    assert_eq!(w.picture(), ["####", "#..#", "####", "####"]);
+#[test]
+fn a_cap_stops_the_count() {
+    let mut w = world(Coord::ZERO, GridSize::new(6, 2, 1));
+    w.draw(&["....#.", "....#."]);
+    w.run(&fill_small(json!("floor"), "orthogonal", 3)[..1]);
+    #[rustfmt::skip]
+    assert_eq!(w.scalars("size"), [
+        3.0, 3.0, 3.0, 3.0, 0.0, 2.0,
+        3.0, 3.0, 3.0, 3.0, 0.0, 2.0,
+    ]);
 }
 
 #[test]
@@ -435,28 +468,35 @@ fn bad_configs_fail_the_build() {
             "{e}"
         );
     };
+    let base = json!({"from": "terrain", "region": "floor", "connectivity": "orthogonal",
+                      "layer": "size"});
+    let with = |extra: Value| {
+        let mut c = base.clone();
+        c.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        step(c)
+    };
+    invalid(w.build_error(&[with(json!({"cap": 0}))]), "cap");
     invalid(
-        w.build_error(&[step(
-            "KeepLargestRegion",
-            json!({"layer": "terrain", "region": ["floor", "wall"], "fill": "wall",
-                   "connectivity": "orthogonal"}),
-        )]),
-        "fill",
+        w.build_error(&[with(json!({"cap": 5, "rank": "rank"}))]),
+        "cap",
     );
-    invalid(
-        w.build_error(&[fill_small(json!("floor"), "orthogonal", 0)]),
-        "below",
-    );
+    // The size goes to a scalar layer, read from a tile layer.
+    assert!(matches!(
+        w.build_error(&[with(json!({"layer": "terrain"}))]),
+        BuildError::Grid(_)
+    ));
     for config in [
-        json!({"layer": "terrain", "region": "floor", "fill": "wall"}),
-        json!({"layer": "terrain", "region": "floor", "fill": "wall", "connectivity": "eight"}),
+        json!({"from": "terrain", "region": "floor", "layer": "size"}),
+        json!({"from": "terrain", "region": "floor", "layer": "size", "connectivity": "eight"}),
     ] {
         assert!(matches!(
-            w.build_error(&[step("KeepLargestRegion", config)]),
+            w.build_error(&[step(config)]),
             BuildError::Config { .. }
         ));
     }
-    let mut with_conditions = keep(json!("floor"), "orthogonal");
+    let mut with_conditions = step(base.clone());
     with_conditions.conditions = vec![
         serde_json::from_str::<Condition>(
             r#"{"type": "tile_is", "layer": "terrain", "tile": "floor"}"#,
@@ -472,8 +512,19 @@ fn bad_configs_fail_the_build() {
 #[test]
 fn scope_and_reach_are_declared() {
     let r = Registry::with_builtins();
-    assert_eq!(r.get("KeepLargestRegion").unwrap().scope, Scope::Global);
-    assert_eq!(r.get("FillSmallRegions").unwrap().scope, Scope::Local);
+    // The config decides: global without a cap, local with one.
+    assert_eq!(r.get("RegionSize").unwrap().scope, Scope::Global);
+    let w = world(Coord::ZERO, GridSize::new(8, 8, 1));
+    let p = Pipeline::build(&r, &w.grid, &w.tiles, &keep(json!("floor"), "diagonal")).unwrap();
+    assert_eq!(p.access("regions").unwrap().scope(), Scope::Global);
+    let p = Pipeline::build(
+        &r,
+        &w.grid,
+        &w.tiles,
+        &fill_small(json!("floor"), "diagonal", 10),
+    )
+    .unwrap();
+    assert_eq!(p.access("regions").unwrap().scope(), Scope::Local);
 
     for (size, reach) in [
         (GridSize::new(8, 8, 1), Reach::symmetric(9, 9, 0)),
@@ -484,7 +535,7 @@ fn scope_and_reach_are_declared() {
             &r,
             &w.grid,
             &w.tiles,
-            &[fill_small(json!("floor"), "diagonal", 10)],
+            &fill_small(json!("floor"), "diagonal", 10),
         )
         .unwrap();
         let terrain = w.grid.layer_id("terrain").unwrap();

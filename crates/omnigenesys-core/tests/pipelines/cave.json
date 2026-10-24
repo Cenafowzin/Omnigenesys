@@ -2,9 +2,25 @@
   "version": 2,
   "description": "Cave: noise smoothed by the 4-5 rule, only its largest open area, then a solid border.",
   "seed": 512,
-  "size": { "width": 64, "height": 32 },
-  "layers": ["terrain"],
-  "tiles": ["floor", "wall"],
+  "size": {
+    "width": 64,
+    "height": 32
+  },
+  "layers": [
+    "terrain",
+    {
+      "name": "size",
+      "kind": "scalar"
+    },
+    {
+      "name": "rank",
+      "kind": "scalar"
+    }
+  ],
+  "tiles": [
+    "floor",
+    "wall"
+  ],
   "params": {
     "wall_chance": {
       "type": "number",
@@ -13,18 +29,32 @@
       "max": 1,
       "description": "Share of walls in the starting noise"
     },
-    "passes": { "type": "integer", "default": 5, "min": 1, "max": 50 }
+    "passes": {
+      "type": "integer",
+      "default": 5,
+      "min": 1,
+      "max": 50
+    }
   },
   "steps": [
     {
       "id": "base",
       "operator": "Fill",
-      "config": { "layer": "terrain", "tile": "floor" }
+      "config": {
+        "layer": "terrain",
+        "tile": "floor"
+      }
     },
     {
       "id": "noise",
       "operator": "Scatter",
-      "config": { "layer": "terrain", "tile": "wall", "chance": { "$param": "wall_chance" } }
+      "config": {
+        "layer": "terrain",
+        "tile": "wall",
+        "chance": {
+          "$param": "wall_chance"
+        }
+      }
     },
     {
       "id": "smooth",
@@ -34,28 +64,84 @@
         "layer": "terrain",
         "alive": "wall",
         "dead": "floor",
-        "birth": [5, 6, 7, 8],
-        "survive": [4, 5, 6, 7, 8],
-        "iterations": { "$param": "passes" },
+        "birth": [
+          5,
+          6,
+          7,
+          8
+        ],
+        "survive": [
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "iterations": {
+          "$param": "passes"
+        },
         "outside": "alive"
       }
     },
     {
-      "id": "one_cave",
-      "operator": "KeepLargestRegion",
-      "description": "Only the largest open area stays; the pockets become wall.",
+      "id": "areas",
+      "operator": "RegionSize",
+      "description": "Size and rank (1 = largest) of every open area.",
       "config": {
-        "layer": "terrain",
+        "from": "terrain",
         "region": "floor",
-        "fill": "wall",
         "connectivity": "orthogonal",
-        "min_cells": 300
+        "layer": "size",
+        "rank": "rank"
       }
     },
     {
+      "id": "big_enough",
+      "operator": "Check",
+      "description": "The largest open area must have at least 300 cells, or the map is thrown away.",
+      "config": {
+        "min": 300,
+        "message": "the largest open area is too small"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "rank",
+          "min": 1,
+          "max": 2
+        }
+      ]
+    },
+    {
+      "id": "one_cave",
+      "operator": "Fill",
+      "description": "Every open area but the largest becomes wall.",
+      "config": {
+        "layer": "terrain",
+        "tile": "wall"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "rank",
+          "min": 2
+        }
+      ]
+    },
+    {
       "id": "border",
-      "operator": "FillBorder",
-      "config": { "layer": "terrain", "tile": "wall", "thickness": 1 }
+      "operator": "Fill",
+      "description": "The outermost ring of the map is wall.",
+      "config": {
+        "layer": "terrain",
+        "tile": "wall"
+      },
+      "conditions": [
+        {
+          "type": "edge_distance",
+          "max": 0
+        }
+      ]
     }
   ]
 }

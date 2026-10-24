@@ -100,20 +100,19 @@ fn the_dispatch_names_every_operator() {
         json!([
             "AssignRooms",
             "CellularAutomaton",
-            "Classify",
+            "Check",
+            "Combine",
             "ConnectRooms",
-            "Falloff",
             "Fill",
-            "FillBorder",
-            "FillSmallRegions",
-            "KeepLargestRegion",
+            "Gradient",
             "Noise",
             "PlaceRooms",
+            "RegionSize",
             "RoomGrid",
             "Scatter"
         ])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 13);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 12);
 }
 
 const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");

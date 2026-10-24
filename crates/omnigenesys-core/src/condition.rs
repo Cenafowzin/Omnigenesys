@@ -62,11 +62,16 @@ enum Compiled {
         min: u32,
         max: u32,
     },
-    /// `min <= value <= max` in a scalar layer; NaN never holds.
+    /// `min <= value < max` in a scalar layer; NaN never holds.
     ScalarInRange {
         layer: LayerId,
         min: f32,
         max: f32,
+    },
+    /// Cells to the nearest edge of the map in `min..=max`.
+    EdgeDistance {
+        min: u32,
+        max: u32,
     },
     Any(Vec<Compiled>),
     All(Vec<Compiled>),
@@ -116,12 +121,24 @@ pub enum Condition {
         min: Option<u32>,
         max: Option<u32>,
     },
-    /// The value of a scalar layer at the cell is in `min..=max` (either
-    /// may be left out): height, moisture, a noise threshold.
+    /// The value of a scalar layer at the cell is at least `min` and below
+    /// `max` (either may be left out): height, moisture, a noise threshold.
+    /// Half-open, so bands written one after another (`max` of one is the
+    /// `min` of the next) neither overlap nor leave a gap.
     ScalarInRange {
         layer: String,
         min: Option<f64>,
         max: Option<f64>,
+    },
+    /// Cells from the cell to the nearest edge of the **map** (not of a
+    /// chunk), from `min` to `max` (both counted, as all whole-number
+    /// ranges are): `max: 0` is the outermost ring, a border of 3 is
+    /// `max: 2`. In 3D the top and bottom count as edges too.
+    EdgeDistance {
+        #[serde(default)]
+        min: Option<u32>,
+        #[serde(default)]
+        max: Option<u32>,
     },
     Any {
         conditions: Vec<Condition>,
@@ -146,8 +163,12 @@ pub enum ConditionError {
     EmptyCountRange { min: u32, max: u32 },
     #[error("scalar_in_range needs at least one of `min` or `max`")]
     RangeWithNoBounds,
-    #[error("scalar range is empty: min {min} > max {max}")]
+    #[error("scalar range is empty: min {min} is not below max {max}")]
     EmptyScalarRange { min: f64, max: f64 },
+    #[error("edge_distance needs at least one of `min` or `max`")]
+    EdgeWithNoBounds,
+    #[error("edge_distance range is empty: min {min} > max {max}")]
+    EmptyEdgeRange { min: u32, max: u32 },
     #[error("layer has {cells} cells, more than a distance condition can count")]
     TooManyCellsToCount { cells: usize },
 }
@@ -345,6 +366,8 @@ fn reads(c: &Compiled, out: &mut Vec<(LayerId, Reach)>) {
         Compiled::TileIs { layer, .. } | Compiled::ScalarInRange { layer, .. } => {
             out.push((*layer, Reach::ZERO));
         }
+        // Reads no layer: only where the cell is in the map.
+        Compiled::EdgeDistance { .. } => {}
         Compiled::NearType { layer, radius, .. }
         | Compiled::NotNearType { layer, radius, .. }
         | Compiled::AreaIs { layer, radius, .. }
@@ -444,6 +467,12 @@ fn prepare(c: &Compiled, grid: &Grid) -> Result<Prepared, ConditionError> {
         Compiled::ScalarInRange { layer, min, max } => {
             Prepared::TileIs(CellMask::from_scalars(grid.scalars(*layer)?, *min, *max))
         }
+        Compiled::EdgeDistance { min, max } => Prepared::TileIs(CellMask::from_edge_distance(
+            grid.bounds(),
+            grid.map(),
+            *min,
+            *max,
+        )),
         Compiled::Any(cs) => Prepared::Any(prepare_all(cs, grid)?),
         Compiled::All(cs) => Prepared::All(prepare_all(cs, grid)?),
         Compiled::Not(c) => Prepared::Not(Box::new(prepare(c, grid)?)),
@@ -559,7 +588,7 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
         Condition::ScalarInRange { layer, min, max } => {
             let (min, max) = match (*min, *max) {
                 (None, None) => return Err(ConditionError::RangeWithNoBounds),
-                (Some(min), Some(max)) if min > max => {
+                (Some(min), Some(max)) if min >= max => {
                     return Err(ConditionError::EmptyScalarRange { min, max });
                 }
                 (min, max) => (
@@ -573,6 +602,16 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
                 max,
             }
         }
+        Condition::EdgeDistance { min, max } => match (*min, *max) {
+            (None, None) => return Err(ConditionError::EdgeWithNoBounds),
+            (Some(min), Some(max)) if min > max => {
+                return Err(ConditionError::EmptyEdgeRange { min, max });
+            }
+            (min, max) => Compiled::EdgeDistance {
+                min: min.unwrap_or(0),
+                max: max.unwrap_or(u32::MAX),
+            },
+        },
         Condition::Any { conditions } => Compiled::Any(compile_all(conditions, grid, tiles)?),
         Condition::All { conditions } => Compiled::All(compile_all(conditions, grid, tiles)?),
         Condition::Not { condition } => Compiled::Not(Box::new(compile(condition, grid, tiles)?)),

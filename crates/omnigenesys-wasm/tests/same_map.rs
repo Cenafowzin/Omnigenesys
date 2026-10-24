@@ -23,14 +23,19 @@ const DUNGEON: &str = include_str!("../../omnigenesys-core/tests/pipelines/masmo
 /// A 3D map through every operator that runs in 3D.
 const VOLUME: &str = r#"{
   "version": 2, "seed": 99, "size": {"width": 40, "height": 24, "depth": 12},
-  "layers": ["terrain"], "tiles": ["rock", "air"],
+  "layers": ["terrain", {"name": "size", "kind": "scalar"}, {"name": "rank", "kind": "scalar"}],
+  "tiles": ["rock", "air"],
   "steps": [
     {"id": "base", "operator": "Fill", "config": {"layer": "terrain", "tile": "rock"}},
     {"id": "holes", "operator": "Scatter", "config": {"layer": "terrain", "tile": "air", "chance": 0.55}},
-    {"id": "specks", "operator": "FillSmallRegions",
-     "config": {"layer": "terrain", "region": "air", "fill": "rock", "connectivity": "orthogonal", "below": 6}},
-    {"id": "one", "operator": "KeepLargestRegion",
-     "config": {"layer": "terrain", "region": "air", "fill": "rock", "connectivity": "diagonal"}}
+    {"id": "sizes", "operator": "RegionSize",
+     "config": {"from": "terrain", "region": "air", "connectivity": "orthogonal", "layer": "size", "cap": 6}},
+    {"id": "specks", "operator": "Fill", "config": {"layer": "terrain", "tile": "rock"},
+     "conditions": [{"type": "scalar_in_range", "layer": "size", "min": 1, "max": 6}]},
+    {"id": "ranks", "operator": "RegionSize",
+     "config": {"from": "terrain", "region": "air", "connectivity": "diagonal", "layer": "size", "rank": "rank"}},
+    {"id": "one", "operator": "Fill", "config": {"layer": "terrain", "tile": "rock"},
+     "conditions": [{"type": "scalar_in_range", "layer": "rank", "min": 2}]}
   ]
 }"#;
 
@@ -67,25 +72,25 @@ fn island() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn cave() {
-    assert_eq!(fingerprint(CAVE), 4_926_128_203_489_471_246);
+    assert_eq!(fingerprint(CAVE), 9_229_285_801_968_616_189);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn volume() {
-    assert_eq!(fingerprint(VOLUME), 5_762_542_940_651_055_300);
+    assert_eq!(fingerprint(VOLUME), 16_705_279_568_056_867_519);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn island_from_noise() {
-    assert_eq!(fingerprint(ISLAND_NOISE), 8_982_297_859_115_373_513);
+    assert_eq!(fingerprint(ISLAND_NOISE), 12_091_903_640_494_519_404);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn archipelago() {
-    assert_eq!(fingerprint(ARCHIPELAGO), 14_932_835_501_811_789_232);
+    assert_eq!(fingerprint(ARCHIPELAGO), 3_463_316_865_257_611_296);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]

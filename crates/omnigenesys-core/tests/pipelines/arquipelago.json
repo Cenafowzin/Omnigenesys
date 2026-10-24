@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Arquipélago: noise fBm com falloff fraco e mar alto; as ilhotas de menos de 6 células somem.",
+  "description": "Arquipélago: noise fBm com gradiente fraco e mar alto, pintado por faixas de altura; as ilhotas de menos de 6 células viram mar.",
   "seed": 512,
   "size": {
     "width": 64,
@@ -10,6 +10,14 @@
     "terreno",
     {
       "name": "altura",
+      "kind": "scalar"
+    },
+    {
+      "name": "distancia",
+      "kind": "scalar"
+    },
+    {
+      "name": "tamanho",
       "kind": "scalar"
     }
   ],
@@ -31,58 +39,139 @@
       }
     },
     {
-      "id": "costa",
-      "operator": "Falloff",
+      "id": "centro",
+      "operator": "Gradient",
+      "description": "1 no centro do mapa, 0 nas bordas.",
       "config": {
-        "layer": "altura",
+        "layer": "distancia",
         "shape": "square",
-        "mix": 0.25
+        "invert": true
       }
     },
     {
-      "id": "biomas",
-      "operator": "Classify",
+      "id": "costa",
+      "operator": "Combine",
+      "description": "Puxa a altura em direção ao gradiente: alta no centro, baixa nas bordas.",
       "config": {
-        "from": "altura",
-        "layer": "terreno",
-        "bands": [
-          {
-            "max": 0.56,
-            "tile": "mar"
-          },
-          {
-            "max": 0.585,
-            "tile": "areia"
-          },
-          {
-            "max": 0.66,
-            "tile": "grama"
-          },
-          {
-            "max": 0.74,
-            "tile": "mata"
-          },
-          {
-            "tile": "pedra"
-          }
-        ]
+        "a": "altura",
+        "b": "distancia",
+        "op": "lerp",
+        "mix": 0.25,
+        "layer": "altura",
+        "clamp": true
       }
     },
     {
-      "id": "sem_ilhotas",
-      "operator": "FillSmallRegions",
+      "id": "mar",
+      "operator": "Fill",
       "config": {
         "layer": "terreno",
+        "tile": "mar"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "max": 0.56
+        }
+      ]
+    },
+    {
+      "id": "praia",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "areia"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.56,
+          "max": 0.585
+        }
+      ]
+    },
+    {
+      "id": "campo",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "grama"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.585,
+          "max": 0.66
+        }
+      ]
+    },
+    {
+      "id": "mata",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "mata"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.66,
+          "max": 0.74
+        }
+      ]
+    },
+    {
+      "id": "pedra",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "pedra"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "altura",
+          "min": 0.74
+        }
+      ]
+    },
+    {
+      "id": "ilhas",
+      "operator": "RegionSize",
+      "description": "Tamanho de cada ilha, contado até 6.",
+      "config": {
+        "from": "terreno",
         "region": [
           "areia",
           "grama",
           "mata",
           "pedra"
         ],
-        "fill": "mar",
         "connectivity": "orthogonal",
-        "below": 6
+        "layer": "tamanho",
+        "cap": 6
       }
+    },
+    {
+      "id": "sem_ilhotas",
+      "operator": "Fill",
+      "description": "As ilhotas de menos de 6 células viram mar.",
+      "config": {
+        "layer": "terreno",
+        "tile": "mar"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "tamanho",
+          "min": 1,
+          "max": 6
+        }
+      ]
     }
   ]
 }

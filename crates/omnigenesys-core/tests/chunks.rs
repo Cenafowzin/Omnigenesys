@@ -7,7 +7,7 @@
 use omnigenesys_core::bounds::Bounds;
 use omnigenesys_core::coords::{Coord, GridSize};
 use omnigenesys_core::grid::Grid;
-use omnigenesys_core::layer::{AnyLayer, LayerKind};
+use omnigenesys_core::layer::LayerKind;
 use omnigenesys_core::operator::{Registry, Scope};
 use omnigenesys_core::pipeline::{Pipeline, StepSpec};
 use omnigenesys_core::tile::TileRegistry;
@@ -29,6 +29,8 @@ fn grid(bounds: Bounds) -> Grid {
     let mut g = Grid::chunk(bounds, MAP);
     g.add_layer("terreno", LayerKind::Tiles).unwrap();
     g.add_layer("altura", LayerKind::Scalar).unwrap();
+    g.add_layer("distancia", LayerKind::Scalar).unwrap();
+    g.add_layer("tamanho", LayerKind::Scalar).unwrap();
     g
 }
 
@@ -38,16 +40,17 @@ fn grid(bounds: Bounds) -> Grid {
 fn agrees(name: &str, steps: &[StepSpec], padding: u32) {
     let registry = Registry::with_builtins();
     let tiles = TileRegistry::new(["chao", "parede", "agua", "areia"]).unwrap();
-    for s in steps {
-        assert_eq!(
-            registry.get(&s.operator).unwrap().scope,
-            Scope::Local,
-            "{name}: {} is not Local",
-            s.operator
-        );
-    }
     let whole_grid = grid(MAP);
     let pipeline = Pipeline::build(&registry, &whole_grid, &tiles, steps).unwrap();
+    // The scope of the built step: a config can make it local.
+    for s in steps {
+        assert_eq!(
+            pipeline.access(&s.id).unwrap().scope(),
+            Scope::Local,
+            "{name}: {} is not Local",
+            s.id
+        );
+    }
     let mut whole = whole_grid;
     pipeline.run(&mut whole, "", 99).unwrap();
 
@@ -97,7 +100,6 @@ fn agrees(name: &str, steps: &[StepSpec], padding: u32) {
             }
         }
     }
-    let _ = AnyLayer::kind;
 }
 
 #[test]
@@ -128,16 +130,16 @@ fn border_uses_the_maps_edge() {
         "border",
         &[step(
             "borda",
-            "FillBorder",
-            json!({"layer": "terreno", "tile": "parede", "thickness": 3}),
-            json!([]),
+            "Fill",
+            json!({"layer": "terreno", "tile": "parede"}),
+            json!([{"type": "edge_distance", "max": 2}]),
         )],
         0,
     );
 }
 
 #[test]
-fn noise_and_falloff_use_world_coordinates_and_the_maps_size() {
+fn noise_and_gradient_use_world_coordinates_and_the_maps_size() {
     agrees(
         "island",
         &[
@@ -148,9 +150,16 @@ fn noise_and_falloff_use_world_coordinates_and_the_maps_size() {
                 json!([]),
             ),
             step(
+                "centro",
+                "Gradient",
+                json!({"layer": "distancia", "shape": "round", "invert": true}),
+                json!([]),
+            ),
+            step(
                 "costa",
-                "Falloff",
-                json!({"layer": "altura", "shape": "round", "mix": 0.6}),
+                "Combine",
+                json!({"a": "altura", "b": "distancia", "op": "lerp", "mix": 0.6,
+                       "layer": "altura", "clamp": true}),
                 json!([]),
             ),
             step(
@@ -200,11 +209,17 @@ fn small_regions_within_their_reach() {
                 json!([]),
             ),
             step(
-                "bolsoes",
-                "FillSmallRegions",
-                json!({"layer": "terreno", "region": "empty", "fill": "parede",
-                "connectivity": "orthogonal", "below": 6}),
+                "tamanho",
+                "RegionSize",
+                json!({"from": "terreno", "region": "empty", "connectivity": "orthogonal",
+                       "layer": "tamanho", "cap": 6}),
                 json!([]),
+            ),
+            step(
+                "bolsoes",
+                "Fill",
+                json!({"layer": "terreno", "tile": "parede"}),
+                json!([{"type": "scalar_in_range", "layer": "tamanho", "min": 1, "max": 6}]),
             ),
         ],
         5,

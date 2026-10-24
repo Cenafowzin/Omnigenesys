@@ -40,10 +40,17 @@ impl Dimensions {
     }
 }
 
-/// Whether an operator decides cell by cell (`Local`: works on any chunk,
+/// Whether a step decides cell by cell (`Local`: works on any chunk,
 /// draws with `rng.at`) or from the whole map (`Global`: uses the stream).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// A property of the **built step**, not only of the operator type: the
+/// type gives the default ([`OperatorType::SCOPE`]), and a config can
+/// change it — region sizes with a cap are local, without one global
+/// (PLANNING §2.14). A world without end has no whole map, so a global
+/// step there is an error, never a silent seam.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Scope {
+    #[default]
     Local,
     Global,
 }
@@ -62,6 +69,8 @@ pub trait Operator: Send + Sync {
 pub trait OperatorType: Operator + Sized + 'static {
     const NAME: &'static str;
     const DIMENSIONS: Dimensions;
+    /// The scope a step of this operator has unless its build says
+    /// otherwise ([`BuildContext::set_scope`]).
     const SCOPE: Scope;
     /// Use `#[serde(deny_unknown_fields)]`: a typo must be an error.
     type Config: DeserializeOwned + JsonSchema;
@@ -82,6 +91,7 @@ pub struct Entry {
     /// whole-file schema shares one table across operators and conditions.
     pub schema: fn(&mut SchemaGenerator) -> Schema,
     pub dimensions: Dimensions,
+    /// The default; each built step may differ (see [`Access::scope`]).
     pub scope: Scope,
 }
 
@@ -217,11 +227,12 @@ impl<'a> BuildContext<'a> {
         grid: &'a Grid,
         tiles: &'a TileRegistry,
         conditions: Option<CompiledCondition>,
+        scope: Scope,
     ) -> BuildContext<'a> {
         let mut bcx = BuildContext {
             grid,
             tiles,
-            access: Access::default(),
+            access: Access::with_scope(scope),
             conditions: None,
         };
         if let Some(c) = conditions {
@@ -229,6 +240,12 @@ impl<'a> BuildContext<'a> {
             bcx.conditions = Some(c);
         }
         bcx
+    }
+
+    /// Sets this step's scope, when its config decides it: `Global` for one
+    /// that needs the whole map, `Local` for one that does not.
+    pub fn set_scope(&mut self, scope: Scope) {
+        self.access.set_scope(scope);
     }
 
     /// The map the pipeline is built for.

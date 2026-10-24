@@ -5,6 +5,7 @@
 //! `terrain` generate 5 more cells.
 
 use crate::grid::LayerId;
+use crate::operator::Scope;
 
 /// How far an access reaches around each cell, per axis and per side.
 /// `below` points toward negative coordinates, `above` toward positive ones.
@@ -80,9 +81,27 @@ pub struct LayerAccess {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Access {
     layers: Vec<LayerAccess>,
+    scope: Scope,
 }
 
 impl Access {
+    pub(crate) fn with_scope(scope: Scope) -> Access {
+        Access {
+            layers: Vec::new(),
+            scope,
+        }
+    }
+
+    /// Whether the step can run on a chunk (`Local`) or needs the whole
+    /// map (`Global`).
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
+
+    pub(crate) fn set_scope(&mut self, scope: Scope) {
+        self.scope = scope;
+    }
+
     pub fn layers(&self) -> &[LayerAccess] {
         &self.layers
     }

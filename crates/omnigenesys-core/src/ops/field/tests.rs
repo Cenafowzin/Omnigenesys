@@ -1,5 +1,5 @@
-//! Noise, Falloff, Classify and the scalar_in_range condition, through
-//! pipeline files as a user writes them.
+//! Noise, Gradient, Combine and the scalar_in_range and edge_distance
+//! conditions, through pipeline files as a user writes them.
 
 use serde_json::{Value, json};
 
@@ -15,7 +15,8 @@ use crate::{
 fn pipeline(size: (u32, u32), steps: Value) -> Value {
     json!({
         "version": 2, "seed": 512, "size": {"width": size.0, "height": size.1},
-        "layers": ["terreno", {"name": "altura", "kind": "scalar"}],
+        "layers": ["terreno", {"name": "altura", "kind": "scalar"},
+                   {"name": "distancia", "kind": "scalar"}],
         "tiles": ["agua", "areia", "grama"],
         "steps": steps,
     })
@@ -37,10 +38,34 @@ fn run(p: &Value) -> Grid {
 }
 
 fn heights(g: &Grid) -> Vec<f32> {
-    g.scalars(g.layer_id("altura").unwrap())
+    scalars(g, "altura")
+}
+
+fn scalars(g: &Grid, layer: &str) -> Vec<f32> {
+    g.scalars(g.layer_id(layer).unwrap())
         .unwrap()
         .as_slice()
         .to_vec()
+}
+
+fn terrain(g: &Grid) -> Vec<crate::tile::TileId> {
+    g.tiles(g.layer_id("terreno").unwrap())
+        .unwrap()
+        .as_slice()
+        .to_vec()
+}
+
+fn tile(name: &str) -> crate::tile::TileId {
+    crate::tile::TileRegistry::new(["agua", "areia", "grama"])
+        .unwrap()
+        .id(name)
+        .unwrap()
+}
+
+/// A `Fill` of `tile` where `altura` is in `min..max`.
+fn band(id: &str, tile: &str, min: Option<f64>, max: Option<f64>) -> Value {
+    json!({"id": id, "operator": "Fill", "config": {"layer": "terreno", "tile": tile},
+           "conditions": [{"type": "scalar_in_range", "layer": "altura", "min": min, "max": max}]})
 }
 
 fn noise(wavelength: f64) -> Value {
@@ -111,16 +136,14 @@ fn noise_agrees_between_maps_that_overlap() {
 }
 
 #[test]
-fn falloff_follows_its_formula() {
-    let base = run(&pipeline((8, 6), json!([noise(5.0)])));
-    let e = heights(&base);
-    for (shape, mix) in [("square", 0.5), ("round", 1.0), ("square", 0.0)] {
+fn gradient_follows_its_formula() {
+    for (shape, invert) in [("square", false), ("round", false), ("round", true)] {
         let g = run(&pipeline(
             (8, 6),
-            json!([noise(5.0), {"id": "costa", "operator": "Falloff",
-                   "config": {"layer": "altura", "shape": shape, "mix": mix}}]),
+            json!([{"id": "centro", "operator": "Gradient",
+                    "config": {"layer": "distancia", "shape": shape, "invert": invert}}]),
         ));
-        let out = heights(&g);
+        let out = scalars(&g, "distancia");
         for y in 0..6 {
             for x in 0..8 {
                 let nx = (2.0 * (x as f64 + 0.5) / 8.0 - 1.0) as f32;
@@ -130,77 +153,131 @@ fn falloff_follows_its_formula() {
                 } else {
                     ((nx * nx + ny * ny) / std::f32::consts::SQRT_2).min(1.0)
                 };
-                let i = y * 8 + x;
-                let want = (e[i] + (1.0 - d - e[i]) * mix as f32).clamp(0.0, 1.0);
-                assert_eq!(out[i], want, "{shape} {mix} at ({x}, {y})");
+                let want = if invert { 1.0 - d } else { d };
+                assert_eq!(out[y * 8 + x], want, "{shape} at ({x}, {y})");
+            }
+        }
+    }
+    let g = run(&pipeline(
+        (4, 2),
+        json!([{"id": "lado", "operator": "Gradient",
+                "config": {"layer": "distancia", "shape": "horizontal"}}]),
+    ));
+    assert_eq!(
+        scalars(&g, "distancia"),
+        [0.125, 0.375, 0.625, 0.875, 0.125, 0.375, 0.625, 0.875]
+    );
+}
+
+#[test]
+fn combine_does_each_operation_cell_by_cell() {
+    let steps = |op: &str, mix: Option<f64>, clamp: bool| {
+        json!([noise(5.0),
+            {"id": "centro", "operator": "Gradient", "config": {"layer": "distancia", "shape": "round"}},
+            {"id": "junta", "operator": "Combine", "config": {
+                "a": "altura", "b": "distancia", "op": op, "mix": mix, "layer": "altura", "clamp": clamp}}])
+    };
+    let base = run(&pipeline((8, 6), json!([noise(5.0)])));
+    let base_g = run(&pipeline(
+        (8, 6),
+        json!([{"id": "centro", "operator": "Gradient", "config": {"layer": "distancia", "shape": "round"}}]),
+    ));
+    let (a, b) = (heights(&base), scalars(&base_g, "distancia"));
+    type F = fn(f32, f32) -> f32;
+    let cases: [(&str, Option<f64>, F); 6] = [
+        ("lerp", Some(0.25), |x, y| x + (y - x) * 0.25),
+        ("add", None, |x, y| x + y),
+        ("subtract", None, |x, y| x - y),
+        ("multiply", None, |x, y| x * y),
+        ("min", None, f32::min),
+        ("max", None, f32::max),
+    ];
+    for (op, mix, f) in cases {
+        for clamp in [false, true] {
+            let out = heights(&run(&pipeline((8, 6), steps(op, mix, clamp))));
+            for i in 0..a.len() {
+                let v = f(a[i], b[i]);
+                let want = if clamp { v.clamp(0.0, 1.0) } else { v };
+                assert_eq!(out[i], want, "{op} clamp {clamp} at {i}");
             }
         }
     }
 }
 
 #[test]
-fn classify_paints_bands_in_order() {
+fn bands_are_fills_with_half_open_ranges() {
+    // Classify's bands, as steps: each `max` is the next band's `min`, and
+    // a value right at a limit belongs to the band above it.
     let g = run(&pipeline(
         (40, 30),
-        json!([noise(8.0), {"id": "biomas", "operator": "Classify", "config": {
-            "from": "altura", "layer": "terreno",
-            "bands": [{"max": 0.4, "tile": "agua"}, {"max": 0.5, "tile": "areia"}, {"tile": "grama"}]}}]),
+        json!([
+            noise(8.0),
+            band("mar", "agua", None, Some(0.4)),
+            band("praia", "areia", Some(0.4), Some(0.5)),
+            band("campo", "grama", Some(0.5), None)
+        ]),
     ));
     let h = heights(&g);
-    let t = g
-        .tiles(g.layer_id("terreno").unwrap())
-        .unwrap()
-        .as_slice()
-        .to_vec();
-    let id = |n: &str| {
-        crate::tile::TileRegistry::new(["agua", "areia", "grama"])
-            .unwrap()
-            .id(n)
-            .unwrap()
-    };
-    for (v, tile) in h.iter().zip(&t) {
+    let t = terrain(&g);
+    for (v, got) in h.iter().zip(&t) {
         let want = if *v < 0.4 {
-            id("agua")
+            tile("agua")
         } else if *v < 0.5 {
-            id("areia")
+            tile("areia")
         } else {
-            id("grama")
+            tile("grama")
         };
-        assert_eq!(*tile, want, "{v}");
+        assert_eq!(*got, want, "{v}");
     }
-    assert!(t.contains(&id("agua")) && t.contains(&id("grama")));
+    assert!(t.contains(&tile("agua")) && t.contains(&tile("grama")));
 }
 
 #[test]
-fn classify_leaves_cells_above_every_band() {
-    let g = run(&pipeline(
-        (30, 30),
-        json!([noise(6.0), {"id": "rasa", "operator": "Classify", "config": {
-            "from": "altura", "layer": "terreno", "bands": [{"max": 0.5, "tile": "agua"}]}}]),
-    ));
-    let h = heights(&g);
-    let t = g.tiles(g.layer_id("terreno").unwrap()).unwrap().as_slice();
-    for (v, tile) in h.iter().zip(t) {
-        assert_eq!(tile.index() != 0, *v < 0.5, "{v}");
-    }
-}
-
-#[test]
-fn scalar_in_range_reads_the_field() {
+fn scalar_in_range_is_half_open() {
     let g = run(&pipeline(
         (40, 30),
-        json!([noise(8.0), {"id": "praia", "operator": "Fill", "config": {"layer": "terreno", "tile": "areia"},
-            "conditions": [{"type": "scalar_in_range", "layer": "altura", "min": 0.45, "max": 0.55}]}]),
+        json!([noise(8.0), band("praia", "areia", Some(0.45), Some(0.55))]),
     ));
     let h = heights(&g);
-    let t = g.tiles(g.layer_id("terreno").unwrap()).unwrap().as_slice();
-    for (v, tile) in h.iter().zip(t) {
-        assert_eq!(
-            tile.index() != 0,
-            (0.45..=0.55).contains(&(f64::from(*v))) && *v >= 0.45f32 && *v <= 0.55f32,
-            "{v}"
-        );
+    for (v, t) in h.iter().zip(terrain(&g)) {
+        assert_eq!(t.index() != 0, *v >= 0.45f32 && *v < 0.55f32, "{v}");
     }
+    // A value exactly at the limit: a gradient of width 4 gives 0.375.
+    let at_limit = |min: Option<f64>, max: Option<f64>| {
+        let g = run(&pipeline(
+            (4, 1),
+            json!([{"id": "lado", "operator": "Gradient",
+                    "config": {"layer": "altura", "shape": "horizontal"}},
+                   band("b", "areia", min, max)]),
+        ));
+        terrain(&g)[1].index() != 0
+    };
+    assert!(at_limit(Some(0.375), None), "min counts");
+    assert!(!at_limit(None, Some(0.375)), "max does not");
+}
+
+#[test]
+fn edge_distance_counts_from_the_maps_edge() {
+    let g = run(&pipeline(
+        (7, 5),
+        json!([{"id": "borda", "operator": "Fill", "config": {"layer": "terreno", "tile": "areia"},
+                "conditions": [{"type": "edge_distance", "max": 0}]},
+               {"id": "anel", "operator": "Fill", "config": {"layer": "terreno", "tile": "grama"},
+                "conditions": [{"type": "edge_distance", "min": 2}]}]),
+    ));
+    let pic: Vec<String> = terrain(&g)
+        .chunks(7)
+        .map(|r| {
+            r.iter()
+                .map(|t| match t.index() {
+                    0 => '.',
+                    i if tile("areia").index() == i => 's',
+                    _ => 'g',
+                })
+                .collect()
+        })
+        .collect();
+    assert_eq!(pic, ["sssssss", "s.....s", "s.ggg.s", "s.....s", "sssssss"]);
 }
 
 #[test]
@@ -242,6 +319,16 @@ fn kinds_are_checked_when_the_pipeline_is_built() {
         )
         .contains("at least one of `min` or `max`")
     );
+    let condition = |c: Value| {
+        message(json!([{"id": "a", "operator": "Fill",
+            "config": {"layer": "terreno", "tile": "agua"}, "conditions": [c]}]))
+    };
+    assert!(
+        condition(json!({"type": "scalar_in_range", "layer": "altura", "min": 0.5, "max": 0.5}))
+            .contains("not below max")
+    );
+    assert!(condition(json!({"type": "edge_distance"})).contains("at least one of"));
+    assert!(condition(json!({"type": "edge_distance", "min": 3, "max": 2})).contains("empty"));
 }
 
 #[test]
@@ -277,23 +364,30 @@ fn bad_field_configs_fail_the_build() {
             json!({"layer": "altura", "wavelength": 8, "kind": "billow"}),
             "kind",
         ),
-        ("Falloff", json!({"layer": "altura", "mix": 2}), "mix"),
         (
-            "Classify",
-            json!({"from": "altura", "layer": "terreno", "bands": []}),
-            "at least one band",
+            "Combine",
+            json!({"a": "altura", "b": "distancia", "op": "lerp", "mix": 2, "layer": "altura"}),
+            "not between 0 and 1",
         ),
         (
-            "Classify",
-            json!({"from": "altura", "layer": "terreno",
-            "bands": [{"max": 0.5, "tile": "agua"}, {"max": 0.4, "tile": "areia"}]}),
-            "not above",
+            "Combine",
+            json!({"a": "altura", "b": "distancia", "op": "lerp", "layer": "altura"}),
+            "lerp needs mix",
         ),
         (
-            "Classify",
-            json!({"from": "altura", "layer": "terreno",
-            "bands": [{"tile": "agua"}, {"max": 0.4, "tile": "areia"}]}),
-            "only the last",
+            "Combine",
+            json!({"a": "altura", "b": "distancia", "op": "add", "mix": 0.5, "layer": "altura"}),
+            "only lerp takes mix",
+        ),
+        (
+            "Combine",
+            json!({"a": "altura", "b": "terreno", "op": "add", "layer": "altura"}),
+            "expected scalar",
+        ),
+        (
+            "Gradient",
+            json!({"layer": "altura", "shape": "diamond"}),
+            "shape",
         ),
     ] {
         let m = field(op, config.clone());
