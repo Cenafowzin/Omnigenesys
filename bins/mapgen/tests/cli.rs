@@ -220,7 +220,10 @@ fn schema_and_operators_go_to_stdout() {
     let o = mapgen(&["operators"]);
     assert_eq!(
         stdout(&o),
-        "Fill             2d/3d  local\nScatter          2d/3d  local\n"
+        "CellularAutomaton  2d     local\n\
+         Fill               2d/3d  local\n\
+         FillBorder         2d     local\n\
+         Scatter            2d/3d  local\n"
     );
 }
 

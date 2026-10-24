@@ -97,7 +97,44 @@ fn the_dispatch_names_every_operator() {
     let step = &s["definitions"]["Step"];
     assert_eq!(
         step["properties"]["operator"]["enum"],
-        json!(["Fill", "Scatter"])
+        json!(["CellularAutomaton", "Fill", "FillBorder", "Scatter"])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 2);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 4);
+}
+
+const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");
+
+#[test]
+fn accepts_the_cave_and_checks_the_automaton_config() {
+    let cave: Value = serde_json::from_str(CAVE).unwrap();
+    let errors: Vec<String> = validator()
+        .iter_errors(&cave)
+        .map(|e| format!("{} at {}", e, e.instance_path()))
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert!(crate::spec::PipelineSpec::parse(CAVE).is_ok());
+
+    // The editor catches what the build would: a count past 8, no
+    // `outside`, zero passes.
+    let rejects = |change: &dyn Fn(&mut Value)| {
+        let mut v = cave.clone();
+        change(&mut v);
+        !validator().is_valid(&v)
+    };
+    assert!(rejects(
+        &|v| v["steps"][2]["config"]["birth"] = json!([5, 9])
+    ));
+    assert!(rejects(&|v| {
+        v["steps"][2]["config"]
+            .as_object_mut()
+            .unwrap()
+            .remove("outside");
+    }));
+    assert!(rejects(
+        &|v| v["steps"][2]["config"]["outside"] = json!("wall")
+    ));
+    assert!(rejects(
+        &|v| v["steps"][2]["config"]["iterations"] = json!(0)
+    ));
+    assert!(rejects(&|v| v["steps"][3]["config"]["thickness"] = json!(0)));
 }

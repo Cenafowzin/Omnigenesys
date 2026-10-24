@@ -91,6 +91,33 @@ fn island_3d() {
     insta::assert_snapshot!(generate(GridSize::new(16, 8, 3), 512));
 }
 
+/// Noise, the cellular automaton and a border: tests/pipelines/cave.json.
+const CAVE: &str = include_str!("pipelines/cave.json");
+
+#[test]
+fn cave_2d() {
+    let spec = PipelineSpec::parse(CAVE).unwrap().spec;
+    let Built {
+        mut grid,
+        tiles,
+        pipeline,
+    } = spec.build(&Registry::with_builtins()).unwrap();
+    pipeline.run(&mut grid, &spec.salt, 512).unwrap();
+    let terrain = grid.tiles(grid.layer_id("terrain").unwrap()).unwrap();
+    let mut out = String::from("legend: . floor  # wall\n");
+    for row in terrain.as_slice().chunks(spec.size.width as usize) {
+        for &t in row {
+            out.push(match tiles.name(t).unwrap() {
+                "floor" => '.',
+                "wall" => '#',
+                _ => ' ',
+            });
+        }
+        out.push('\n');
+    }
+    insta::assert_snapshot!(out);
+}
+
 #[test]
 fn scatter_gives_each_cell_the_same_answer_in_any_map() {
     // Two maps of different size and origin that overlap: in the overlap the

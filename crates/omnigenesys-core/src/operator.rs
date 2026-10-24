@@ -257,6 +257,20 @@ impl<'a> BuildContext<'a> {
         Ok(WriteHandle { layer: id })
     }
 
+    /// Declares a synchronous update of `layer`: each cell's new value comes
+    /// from the layer as the step found it, up to `reach` cells around (a
+    /// cellular automaton). Not a conflict, unlike [`read`](Self::read) and
+    /// [`write`](Self::write) of the same layer: the operator reads the whole
+    /// layer through [`GridView::tiles_mut`] before writing any of it, and
+    /// keeps its own double buffer (PLANNING §2.7 item 15, §2.8).
+    pub fn read_write(&mut self, layer: &str, reach: Reach) -> Result<WriteHandle, BuildError> {
+        let id = self.grid.layer_id(layer)?;
+        let reach = self.normalize(reach);
+        self.access.add_snapshot_read(id, reach);
+        self.access.add_write(id, Reach::ZERO);
+        Ok(WriteHandle { layer: id })
+    }
+
     pub fn tile(&self, name: &str) -> Result<TileId, BuildError> {
         Ok(self.tiles.id(name)?)
     }
@@ -279,7 +293,7 @@ impl<'a> BuildContext<'a> {
 
     fn record_condition(&mut self, c: &CompiledCondition) {
         for (layer, reach) in c.reads() {
-            self.access.add_condition_read(layer, reach);
+            self.access.add_snapshot_read(layer, reach);
         }
     }
 

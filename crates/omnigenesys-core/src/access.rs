@@ -65,9 +65,11 @@ pub struct LayerAccess {
     pub layer: LayerId,
     /// Read live while the step runs, through a [`ReadHandle`].
     pub read: Option<Reach>,
-    /// Read through conditions: a snapshot taken when the step starts, so it
-    /// never sees the step's own writes.
-    pub condition_read: Option<Reach>,
+    /// Read as the step found it, so it never sees the step's own writes:
+    /// through conditions (a snapshot taken when the step starts), or by an
+    /// operator that updates the layer synchronously
+    /// ([`BuildContext::read_write`](crate::operator::BuildContext::read_write)).
+    pub snapshot_read: Option<Reach>,
     /// Written, and how far past the cell (a stamp that crosses a border).
     pub write: Option<Reach>,
 }
@@ -89,7 +91,7 @@ impl Access {
     /// chunk padding has to cover.
     pub fn read_reach(&self, layer: LayerId) -> Option<Reach> {
         let a = self.get(layer)?;
-        match (a.read, a.condition_read) {
+        match (a.read, a.snapshot_read) {
             (Some(r), Some(c)) => Some(r.union(c)),
             (r, c) => r.or(c),
         }
@@ -114,7 +116,7 @@ impl Access {
                 self.layers.push(LayerAccess {
                     layer,
                     read: None,
-                    condition_read: None,
+                    snapshot_read: None,
                     write: None,
                 });
                 self.layers.len() - 1
@@ -128,9 +130,9 @@ impl Access {
         e.read = Some(e.read.map_or(reach, |r| r.union(reach)));
     }
 
-    pub(crate) fn add_condition_read(&mut self, layer: LayerId, reach: Reach) {
+    pub(crate) fn add_snapshot_read(&mut self, layer: LayerId, reach: Reach) {
         let e = self.entry(layer);
-        e.condition_read = Some(e.condition_read.map_or(reach, |r| r.union(reach)));
+        e.snapshot_read = Some(e.snapshot_read.map_or(reach, |r| r.union(reach)));
     }
 
     pub(crate) fn add_write(&mut self, layer: LayerId, reach: Reach) {

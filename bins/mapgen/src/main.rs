@@ -235,6 +235,7 @@ fn print_schema(registry: &Registry, output: Option<&Path>) -> Result<(), Failed
 
 fn operators(registry: &Registry) -> Result<(), Failed> {
     let mut out = io::stdout().lock();
+    let width = registry.names().map(str::len).max().unwrap_or(0);
     for name in registry.names() {
         let Some(entry) = registry.get(name) else {
             continue;
@@ -248,7 +249,7 @@ fn operators(registry: &Registry) -> Result<(), Failed> {
             Scope::Local => "local",
             Scope::Global => "global",
         };
-        writeln!(out, "{name:<16} {dimensions:<6} {scope}").map_err(fail)?;
+        writeln!(out, "{name:<width$}  {dimensions:<6} {scope}").map_err(fail)?;
     }
     Ok(())
 }

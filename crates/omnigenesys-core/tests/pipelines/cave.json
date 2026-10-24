@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "description": "Cave: noise smoothed by the 4-5 rule, then a solid border.",
+  "seed": 512,
+  "size": { "width": 64, "height": 32 },
+  "layers": ["terrain"],
+  "tiles": ["floor", "wall"],
+  "params": {
+    "wall_chance": {
+      "type": "number",
+      "default": 0.45,
+      "min": 0,
+      "max": 1,
+      "description": "Share of walls in the starting noise"
+    },
+    "passes": { "type": "integer", "default": 5, "min": 1, "max": 50 }
+  },
+  "steps": [
+    {
+      "id": "base",
+      "operator": "Fill",
+      "config": { "layer": "terrain", "tile": "floor" }
+    },
+    {
+      "id": "noise",
+      "operator": "Scatter",
+      "config": { "layer": "terrain", "tile": "wall", "chance": { "$param": "wall_chance" } }
+    },
+    {
+      "id": "smooth",
+      "operator": "CellularAutomaton",
+      "description": "A floor cell with 5 or more walls around becomes a wall; a wall with 4 or more stays.",
+      "config": {
+        "layer": "terrain",
+        "alive": "wall",
+        "dead": "floor",
+        "birth": [5, 6, 7, 8],
+        "survive": [4, 5, 6, 7, 8],
+        "iterations": { "$param": "passes" },
+        "outside": "alive"
+      }
+    },
+    {
+      "id": "border",
+      "operator": "FillBorder",
+      "config": { "layer": "terrain", "tile": "wall", "thickness": 1 }
+    }
+  ]
+}

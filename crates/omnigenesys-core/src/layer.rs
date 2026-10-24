@@ -76,6 +76,11 @@ impl<T> Layer<T> {
         &self.cells
     }
 
+    /// Same order as [`as_slice`](Self::as_slice).
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.cells
+    }
+
     pub fn cells(&self) -> impl Iterator<Item = &T> {
         self.cells.iter()
     }
