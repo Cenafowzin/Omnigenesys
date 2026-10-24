@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Cave: noise smoothed by the 4-5 rule, then a solid border.",
+  "description": "Cave: noise smoothed by the 4-5 rule, only its largest open area, then a solid border.",
   "seed": 512,
   "size": { "width": 64, "height": 32 },
   "layers": ["terrain"],
@@ -38,6 +38,18 @@
         "survive": [4, 5, 6, 7, 8],
         "iterations": { "$param": "passes" },
         "outside": "alive"
+      }
+    },
+    {
+      "id": "one_cave",
+      "operator": "KeepLargestRegion",
+      "description": "Only the largest open area stays; the pockets become wall.",
+      "config": {
+        "layer": "terrain",
+        "region": "floor",
+        "fill": "wall",
+        "connectivity": "orthogonal",
+        "min_cells": 300
       }
     },
     {

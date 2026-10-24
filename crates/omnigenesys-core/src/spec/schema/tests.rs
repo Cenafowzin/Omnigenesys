@@ -97,9 +97,16 @@ fn the_dispatch_names_every_operator() {
     let step = &s["definitions"]["Step"];
     assert_eq!(
         step["properties"]["operator"]["enum"],
-        json!(["CellularAutomaton", "Fill", "FillBorder", "Scatter"])
+        json!([
+            "CellularAutomaton",
+            "Fill",
+            "FillBorder",
+            "FillSmallRegions",
+            "KeepLargestRegion",
+            "Scatter"
+        ])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 4);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 6);
 }
 
 const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");
@@ -136,5 +143,17 @@ fn accepts_the_cave_and_checks_the_automaton_config() {
     assert!(rejects(
         &|v| v["steps"][2]["config"]["iterations"] = json!(0)
     ));
-    assert!(rejects(&|v| v["steps"][3]["config"]["thickness"] = json!(0)));
+    assert!(rejects(&|v| v["steps"][4]["config"]["thickness"] = json!(0)));
+    assert!(rejects(
+        &|v| v["steps"][3]["config"]["connectivity"] = json!("eight")
+    ));
+    assert!(rejects(&|v| {
+        v["steps"][3]["config"]
+            .as_object_mut()
+            .unwrap()
+            .remove("connectivity");
+    }));
+    assert!(!rejects(
+        &|v| v["steps"][3]["config"]["region"] = json!(["floor", "wall"])
+    ));
 }

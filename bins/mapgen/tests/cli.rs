@@ -223,6 +223,8 @@ fn schema_and_operators_go_to_stdout() {
         "CellularAutomaton  2d     local\n\
          Fill               2d/3d  local\n\
          FillBorder         2d     local\n\
+         FillSmallRegions   2d/3d  local\n\
+         KeepLargestRegion  2d/3d  global\n\
          Scatter            2d/3d  local\n"
     );
 }

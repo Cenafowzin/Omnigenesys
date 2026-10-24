@@ -10,6 +10,8 @@ use crate::{
     tile::TileId,
 };
 
+use super::bits::pack;
+
 /// Runs a birth/survival cellular automaton over two tiles of a layer: the
 /// cave generator (PLANNING §2.8).
 ///
@@ -427,20 +429,6 @@ impl RowSums {
             w1[k] = l & r;
         }
     }
-}
-
-/// 64 bytes of 0 or 1 to 64 bits, byte i to bit i. Per 8 bytes, the
-/// multiply moves byte i's bit to bit 56 + i; the partial products land on
-/// distinct bits, so nothing carries into the top byte. `from_le_bytes`
-/// fixes the byte order, so it is the same on big-endian.
-#[inline]
-fn pack(bytes: &[u8; 64]) -> u64 {
-    let mut word = 0;
-    for (j, b) in bytes.chunks_exact(8).enumerate() {
-        let v = u64::from_le_bytes(b.try_into().expect("8 bytes"));
-        word |= (v.wrapping_mul(0x0102_0408_1020_4080) >> 56) << (8 * j);
-    }
-    word
 }
 
 /// 64 bits to 64 bytes, bit i to byte i: 0 or 0xff.
