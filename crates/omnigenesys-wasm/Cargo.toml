@@ -1,0 +1,27 @@
+[package]
+name = "omnigenesys_wasm"
+description = "Omnigenesys in the browser: parse, check and run pipelines from JavaScript"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+# cdylib: the .wasm for the browser; rlib: the native tests of `api`.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+omnigenesys_core = { path = "../omnigenesys-core" }
+serde_json = "1"
+schemars = "1"
+# The wasm-bindgen CLI must be this exact version (its schema changes
+# between releases): `cargo install wasm-bindgen-cli --version 0.2.129`.
+wasm-bindgen = "=0.2.129"
+js-sys = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

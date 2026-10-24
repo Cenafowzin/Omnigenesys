@@ -1,0 +1,4 @@
+# `cargo test --target wasm32-unknown-unknown -p omnigenesys_wasm` runs the
+# tests in Node through wasm-bindgen (same version as the crate: 0.2.129).
+[target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"

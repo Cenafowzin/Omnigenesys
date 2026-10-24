@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/omnigenesys-core", "bins/mapgen"]
+members = ["crates/omnigenesys-core", "crates/omnigenesys-wasm", "bins/mapgen"]
 resolver = "3"
 
 [workspace.package]
@@ -11,3 +11,12 @@ repository = "https://github.com/Cenafowzin/Omnigenesys"
 
 [profile.release]
 codegen-units = 1
+
+# The browser build. opt-level 3, not "s": island 1024² in V8, 3 alternating
+# rounds of 15 (2026-10-24), 34 ms against 47 for a binary 5% larger
+# (931 against 887 KB). LTO across the core; a panic aborts anyway on wasm.
+# Built by crates/omnigenesys-wasm/build.sh.
+[profile.wasm-release]
+inherits = "release"
+lto = true
+panic = "abort"
