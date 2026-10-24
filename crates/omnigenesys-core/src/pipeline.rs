@@ -92,15 +92,45 @@ impl Pipeline {
     /// Runs every step in order on `grid`, each with its own randomness.
     /// Stops at the first failing step.
     pub fn run(&self, grid: &mut Grid, salt: &str, seed: u64) -> Result<(), StepError<OpError>> {
-        for step in &self.steps {
-            let rng = StepRng::new(salt, seed, &step.id);
-            let mut ctx = crate::operator::Context::new(grid, &step.access, rng);
-            step.operator.execute(&mut ctx).map_err(|error| StepError {
-                step_id: step.id.clone(),
-                error,
-            })?;
-        }
-        Ok(())
+        (0..self.steps.len()).try_for_each(|i| self.run_step(i, grid, salt, seed))
+    }
+
+    /// Runs only step `i` (of the enabled steps, in order). Running them
+    /// all one by one, in order, is exactly [`run`](Self::run): each step's
+    /// randomness depends on its id, not on what ran before. For an editor
+    /// that shows the map after each step.
+    ///
+    /// # Panics
+    ///
+    /// If `i` is not below [`len`](Self::len).
+    pub fn run_step(
+        &self,
+        i: usize,
+        grid: &mut Grid,
+        salt: &str,
+        seed: u64,
+    ) -> Result<(), StepError<OpError>> {
+        let step = &self.steps[i];
+        let rng = StepRng::new(salt, seed, &step.id);
+        let mut ctx = crate::operator::Context::new(grid, &step.access, rng);
+        step.operator.execute(&mut ctx).map_err(|error| StepError {
+            step_id: step.id.clone(),
+            error,
+        })
+    }
+
+    /// Enabled steps, the ones that run.
+    pub fn len(&self) -> usize {
+        self.steps.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+
+    /// The id of step `i`, in run order.
+    pub fn step_id(&self, i: usize) -> Option<&str> {
+        self.steps.get(i).map(|s| s.id.as_str())
     }
 
     /// What a step reads and writes, as built.

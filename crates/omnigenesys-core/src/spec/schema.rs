@@ -83,7 +83,7 @@ pub fn schema(registry: &Registry) -> Value {
                             "required": ["name"],
                             "properties": {
                                 "name": {"type": "string", "minLength": 1},
-                                "kind": {"enum": ["tiles"]}
+                                "kind": {"enum": ["tiles", "scalar"]}
                             }
                         }
                     ]

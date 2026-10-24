@@ -62,16 +62,15 @@ impl Grid {
         if self.layers.contains_key(&name) {
             return Err(GridError::DuplicateLayer { name });
         }
+        let too_large = |e: crate::layer::TooLarge| GridError::LayerTooLarge {
+            name: name.clone(),
+            size: e.size,
+        };
         let layer = match kind {
             LayerKind::Tiles => {
-                let tiles = Layer::new(self.bounds, TileId::EMPTY).map_err(|e| {
-                    GridError::LayerTooLarge {
-                        name: name.clone(),
-                        size: e.size,
-                    }
-                })?;
-                AnyLayer::Tiles(tiles)
+                AnyLayer::Tiles(Layer::new(self.bounds, TileId::EMPTY).map_err(too_large)?)
             }
+            LayerKind::Scalar => AnyLayer::Scalar(Layer::new(self.bounds, 0.0).map_err(too_large)?),
         };
         let (index, _) = self.layers.insert_full(name, layer);
         Ok(LayerId(index))
@@ -85,32 +84,84 @@ impl Grid {
         self.layers.keys().map(|s| s.as_str())
     }
 
-    pub fn tiles(&self, id: LayerId) -> Result<&Layer<TileId>, GridError> {
-        let (name, layer) = self
-            .layers
+    /// The kind of layer `id`.
+    pub fn kind(&self, id: LayerId) -> Result<LayerKind, GridError> {
+        self.layers
             .get_index(id.0)
-            .ok_or(GridError::UnknownLayerId { id })?;
-        layer.as_tiles().ok_or_else(|| GridError::WrongLayerKind {
-            name: name.to_string(),
-            expected: LayerKind::Tiles,
-            found: layer.kind(),
-        })
+            .map(|(_, l)| l.kind())
+            .ok_or(GridError::UnknownLayerId { id })
+    }
+
+    pub fn tiles(&self, id: LayerId) -> Result<&Layer<TileId>, GridError> {
+        let (name, layer) = self.entry(id)?;
+        layer
+            .as_tiles()
+            .ok_or_else(|| wrong(name, LayerKind::Tiles, layer.kind()))
     }
 
     pub fn tiles_mut(&mut self, id: LayerId) -> Result<&mut Layer<TileId>, GridError> {
-        let (name, layer) = self
-            .layers
-            .get_index_mut(id.0)
-            .ok_or(GridError::UnknownLayerId { id })?;
+        let (name, layer) = self.entry_mut(id)?;
         let found = layer.kind();
         layer
             .as_tiles_mut()
-            .ok_or_else(|| GridError::WrongLayerKind {
-                name: name.to_string(),
-                expected: LayerKind::Tiles,
-                found,
-            })
+            .ok_or_else(|| wrong(name, LayerKind::Tiles, found))
+    }
+
+    pub fn scalars(&self, id: LayerId) -> Result<&Layer<f32>, GridError> {
+        let (name, layer) = self.entry(id)?;
+        layer
+            .as_scalar()
+            .ok_or_else(|| wrong(name, LayerKind::Scalar, layer.kind()))
+    }
+
+    pub fn scalars_mut(&mut self, id: LayerId) -> Result<&mut Layer<f32>, GridError> {
+        let (name, layer) = self.entry_mut(id)?;
+        let found = layer.kind();
+        layer
+            .as_scalar_mut()
+            .ok_or_else(|| wrong(name, LayerKind::Scalar, found))
+    }
+
+    /// A scalar layer to read and a tile layer to write, borrowed together.
+    pub fn scalars_and_tiles_mut(
+        &mut self,
+        read: LayerId,
+        write: LayerId,
+    ) -> Result<(&Layer<f32>, &mut Layer<TileId>), GridError> {
+        let [(rn, r), (wn, w)] = self
+            .layers
+            .get_disjoint_indices_mut([read.0, write.0])
+            .map_err(|_| GridError::UnknownLayerId { id: write })?;
+        let (rk, wk) = (r.kind(), w.kind());
+        let r = r
+            .as_scalar()
+            .ok_or_else(|| wrong(rn, LayerKind::Scalar, rk))?;
+        let w = w
+            .as_tiles_mut()
+            .ok_or_else(|| wrong(wn, LayerKind::Tiles, wk))?;
+        Ok((r, w))
+    }
+
+    fn entry(&self, id: LayerId) -> Result<(&String, &AnyLayer), GridError> {
+        self.layers
+            .get_index(id.0)
+            .ok_or(GridError::UnknownLayerId { id })
+    }
+
+    fn entry_mut(&mut self, id: LayerId) -> Result<(&String, &mut AnyLayer), GridError> {
+        self.layers
+            .get_index_mut(id.0)
+            .ok_or(GridError::UnknownLayerId { id })
     }
 }
+
+fn wrong(name: &str, expected: LayerKind, found: LayerKind) -> GridError {
+    GridError::WrongLayerKind {
+        name: name.to_string(),
+        expected,
+        found,
+    }
+}
+
 #[cfg(test)]
 mod tests;

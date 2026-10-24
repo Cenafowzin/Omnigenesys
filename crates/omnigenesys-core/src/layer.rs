@@ -14,12 +14,15 @@ pub struct Layer<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnyLayer {
     Tiles(Layer<TileId>),
+    /// A number per cell: height, moisture, density (PLANNING §8.4).
+    Scalar(Layer<f32>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LayerKind {
     Tiles,
+    Scalar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -117,6 +120,7 @@ impl AnyLayer {
     pub fn kind(&self) -> LayerKind {
         match self {
             AnyLayer::Tiles(_) => LayerKind::Tiles,
+            AnyLayer::Scalar(_) => LayerKind::Scalar,
         }
     }
 
@@ -124,6 +128,7 @@ impl AnyLayer {
     pub fn bounds(&self) -> Bounds {
         match self {
             AnyLayer::Tiles(layer) => layer.bounds(),
+            AnyLayer::Scalar(layer) => layer.bounds(),
         }
     }
 
@@ -131,6 +136,7 @@ impl AnyLayer {
     pub fn as_tiles(&self) -> Option<&Layer<TileId>> {
         match self {
             AnyLayer::Tiles(layer) => Some(layer),
+            AnyLayer::Scalar(_) => None,
         }
     }
 
@@ -138,6 +144,23 @@ impl AnyLayer {
     pub fn as_tiles_mut(&mut self) -> Option<&mut Layer<TileId>> {
         match self {
             AnyLayer::Tiles(layer) => Some(layer),
+            AnyLayer::Scalar(_) => None,
+        }
+    }
+
+    #[inline]
+    pub fn as_scalar(&self) -> Option<&Layer<f32>> {
+        match self {
+            AnyLayer::Scalar(layer) => Some(layer),
+            AnyLayer::Tiles(_) => None,
+        }
+    }
+
+    #[inline]
+    pub fn as_scalar_mut(&mut self) -> Option<&mut Layer<f32>> {
+        match self {
+            AnyLayer::Scalar(layer) => Some(layer),
+            AnyLayer::Tiles(_) => None,
         }
     }
 }
@@ -146,6 +169,7 @@ impl std::fmt::Display for LayerKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LayerKind::Tiles => write!(f, "tiles"),
+            LayerKind::Scalar => write!(f, "scalar"),
         }
     }
 }

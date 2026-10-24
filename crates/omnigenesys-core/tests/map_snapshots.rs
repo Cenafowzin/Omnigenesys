@@ -118,6 +118,60 @@ fn cave_2d() {
     insta::assert_snapshot!(out);
 }
 
+/// The terrain of a pipeline file run with its own seed, as ASCII.
+fn terrain_of(text: &str, glyphs: &[(&str, char)]) -> String {
+    let spec = PipelineSpec::parse(text).unwrap().spec;
+    let Built {
+        mut grid,
+        tiles,
+        pipeline,
+    } = spec.build(&Registry::with_builtins()).unwrap();
+    pipeline
+        .run(&mut grid, &spec.salt, spec.seed.unwrap())
+        .unwrap();
+    let terrain = grid.tiles(grid.layer_id("terreno").unwrap()).unwrap();
+    let mut out = String::from("legend:");
+    for (name, g) in glyphs {
+        out.push_str(&format!(" {g} {name}"));
+    }
+    out.push('\n');
+    for row in terrain.as_slice().chunks(spec.size.width as usize) {
+        for &t in row {
+            let name = tiles.name(t).unwrap();
+            out.push(glyphs.iter().find(|(n, _)| *n == name).map_or('?', |g| g.1));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+const TERRAIN_GLYPHS: &[(&str, char)] = &[
+    ("mar", '~'),
+    ("areia", '.'),
+    ("grama", ','),
+    ("mata", '"'),
+    ("pedra", '^'),
+    ("neve", '*'),
+];
+
+/// Noise, falloff and bands: tests/pipelines/ilha.json.
+#[test]
+fn island_from_noise() {
+    insta::assert_snapshot!(terrain_of(
+        include_str!("pipelines/ilha.json"),
+        TERRAIN_GLYPHS
+    ));
+}
+
+/// Finer noise, a higher sea, specks removed: tests/pipelines/arquipelago.json.
+#[test]
+fn archipelago_from_noise() {
+    insta::assert_snapshot!(terrain_of(
+        include_str!("pipelines/arquipelago.json"),
+        TERRAIN_GLYPHS
+    ));
+}
+
 #[test]
 fn scatter_gives_each_cell_the_same_answer_in_any_map() {
     // Two maps of different size and origin that overlap: in the overlap the

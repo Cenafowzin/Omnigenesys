@@ -7,12 +7,12 @@ use crate::{
     bounds::Bounds,
     coords::Coord,
     grid::{Grid, GridError, LayerId},
-    layer::Layer,
+    layer::{Layer, LayerKind},
     mask::{CellMask, MaskWriter},
     tile::{TileError, TileId, TileRegistry, TileSet},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompiledCondition(Compiled);
 
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ enum Prepared {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Compiled {
     TileIs {
         layer: LayerId,
@@ -62,6 +62,12 @@ enum Compiled {
         min: u32,
         max: u32,
     },
+    /// `min <= value <= max` in a scalar layer; NaN never holds.
+    ScalarInRange {
+        layer: LayerId,
+        min: f32,
+        max: f32,
+    },
     Any(Vec<Compiled>),
     All(Vec<Compiled>),
     Not(Box<Compiled>),
@@ -81,7 +87,7 @@ pub enum TileSpec {
     Many(Vec<String>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Condition {
     TileIs {
@@ -110,6 +116,13 @@ pub enum Condition {
         min: Option<u32>,
         max: Option<u32>,
     },
+    /// The value of a scalar layer at the cell is in `min..=max` (either
+    /// may be left out): height, moisture, a noise threshold.
+    ScalarInRange {
+        layer: String,
+        min: Option<f64>,
+        max: Option<f64>,
+    },
     Any {
         conditions: Vec<Condition>,
     },
@@ -121,7 +134,7 @@ pub enum Condition {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, PartialEq, Error)]
 pub enum ConditionError {
     #[error(transparent)]
     Grid(#[from] GridError),
@@ -131,6 +144,10 @@ pub enum ConditionError {
     CountWithNoBounds,
     #[error("count range is empty: min {min} > max {max}")]
     EmptyCountRange { min: u32, max: u32 },
+    #[error("scalar_in_range needs at least one of `min` or `max`")]
+    RangeWithNoBounds,
+    #[error("scalar range is empty: min {min} > max {max}")]
+    EmptyScalarRange { min: f64, max: f64 },
     #[error("layer has {cells} cells, more than a distance condition can count")]
     TooManyCellsToCount { cells: usize },
 }
@@ -325,7 +342,9 @@ impl CompiledCondition {
 
 fn reads(c: &Compiled, out: &mut Vec<(LayerId, Reach)>) {
     match c {
-        Compiled::TileIs { layer, .. } => out.push((*layer, Reach::ZERO)),
+        Compiled::TileIs { layer, .. } | Compiled::ScalarInRange { layer, .. } => {
+            out.push((*layer, Reach::ZERO));
+        }
         Compiled::NearType { layer, radius, .. }
         | Compiled::NotNearType { layer, radius, .. }
         | Compiled::AreaIs { layer, radius, .. }
@@ -422,6 +441,9 @@ fn prepare(c: &Compiled, grid: &Grid) -> Result<Prepared, ConditionError> {
             grid.tiles(*layer)?,
             &TileSet::new(tiles),
         )),
+        Compiled::ScalarInRange { layer, min, max } => {
+            Prepared::TileIs(CellMask::from_scalars(grid.scalars(*layer)?, *min, *max))
+        }
         Compiled::Any(cs) => Prepared::Any(prepare_all(cs, grid)?),
         Compiled::All(cs) => Prepared::All(prepare_all(cs, grid)?),
         Compiled::Not(c) => Prepared::Not(Box::new(prepare(c, grid)?)),
@@ -482,7 +504,7 @@ fn prepare_all(cs: &[Compiled], grid: &Grid) -> Result<Vec<Prepared>, ConditionE
 fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled, ConditionError> {
     Ok(match c {
         Condition::TileIs { layer, tile } => Compiled::TileIs {
-            layer: grid.layer_id(layer)?,
+            layer: tile_layer(grid, layer)?,
             tiles: resolve_tiles(tile, tiles)?,
         },
         Condition::NearType {
@@ -490,7 +512,7 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
             tile,
             distance,
         } => Compiled::NearType {
-            layer: grid.layer_id(layer)?,
+            layer: tile_layer(grid, layer)?,
             tiles: resolve_tiles(tile, tiles)?,
             radius: radius(*distance, grid),
         },
@@ -499,7 +521,7 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
             tile,
             distance,
         } => Compiled::NotNearType {
-            layer: grid.layer_id(layer)?,
+            layer: tile_layer(grid, layer)?,
             tiles: resolve_tiles(tile, tiles)?,
             radius: radius(*distance, grid),
         },
@@ -508,7 +530,7 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
             tile,
             distance,
         } => Compiled::AreaIs {
-            layer: grid.layer_id(layer)?,
+            layer: tile_layer(grid, layer)?,
             tiles: resolve_tiles(tile, tiles)?,
             radius: radius(*distance, grid),
         },
@@ -527,9 +549,26 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
                 (min, max) => (min.unwrap_or(0), max.unwrap_or(u32::MAX)),
             };
             Compiled::Count {
-                layer: grid.layer_id(layer)?,
+                layer: tile_layer(grid, layer)?,
                 tiles: resolve_tiles(tile, tiles)?,
                 radius: radius(*distance, grid),
+                min,
+                max,
+            }
+        }
+        Condition::ScalarInRange { layer, min, max } => {
+            let (min, max) = match (*min, *max) {
+                (None, None) => return Err(ConditionError::RangeWithNoBounds),
+                (Some(min), Some(max)) if min > max => {
+                    return Err(ConditionError::EmptyScalarRange { min, max });
+                }
+                (min, max) => (
+                    min.map_or(f32::NEG_INFINITY, |v| v as f32),
+                    max.map_or(f32::INFINITY, |v| v as f32),
+                ),
+            };
+            Compiled::ScalarInRange {
+                layer: kind_layer(grid, layer, LayerKind::Scalar)?,
                 min,
                 max,
             }
@@ -538,6 +577,25 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
         Condition::All { conditions } => Compiled::All(compile_all(conditions, grid, tiles)?),
         Condition::Not { condition } => Compiled::Not(Box::new(compile(condition, grid, tiles)?)),
     })
+}
+
+/// A layer a tile condition reads: one of tiles, or the build fails naming it.
+fn tile_layer(grid: &Grid, name: &str) -> Result<LayerId, ConditionError> {
+    kind_layer(grid, name, LayerKind::Tiles)
+}
+
+fn kind_layer(grid: &Grid, name: &str, kind: LayerKind) -> Result<LayerId, ConditionError> {
+    let id = grid.layer_id(name)?;
+    let found = grid.kind(id)?;
+    if found != kind {
+        return Err(GridError::WrongLayerKind {
+            name: name.to_string(),
+            expected: kind,
+            found,
+        }
+        .into());
+    }
+    Ok(id)
 }
 
 fn compile_all(

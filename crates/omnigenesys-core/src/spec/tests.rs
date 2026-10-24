@@ -173,11 +173,13 @@ fn layers_are_names_or_objects() {
     assert_eq!(names, ["terrain", "objects", "x"]);
     assert!(spec.layers.iter().all(|l| l.kind == LayerKind::Tiles));
 
+    let text = with(|v| v["layers"][0] = json!({"name": "t", "kind": "scalar"}));
+    assert_eq!(parse(&text).spec.layers[0].kind, LayerKind::Scalar);
     let (at, message) = one_error(&with(|v| {
-        v["layers"][0] = json!({"name": "t", "kind": "scalar"})
+        v["layers"][0] = json!({"name": "t", "kind": "volume"})
     }));
     assert_eq!(at, "/layers/0/kind");
-    assert!(message.contains("unknown variant `scalar`"), "{message}");
+    assert!(message.contains("unknown variant `volume`"), "{message}");
     let (at, message) = one_error(&with(|v| v["layers"][0] = json!({"nme": "t"})));
     assert_eq!(at, "/layers/0/nme");
     assert!(message.starts_with("unknown field `nme`"), "{message}");

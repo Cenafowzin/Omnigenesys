@@ -11,6 +11,7 @@ pub mod export;
 pub mod grid;
 pub mod layer;
 pub mod mask;
+pub mod noise;
 pub mod operator;
 pub mod ops;
 pub mod pipeline;

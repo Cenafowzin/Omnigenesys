@@ -45,6 +45,15 @@ impl CellMask {
         w.finish()
     }
 
+    /// True where `min <= value <= max`; NaN is never in range.
+    pub(crate) fn from_scalars(layer: &Layer<f32>, min: f32, max: f32) -> CellMask {
+        let mut w = MaskWriter::new(layer.bounds());
+        for &v in layer.cells() {
+            w.push(v >= min && v <= max);
+        }
+        w.finish()
+    }
+
     pub fn bounds(&self) -> Bounds {
         self.bounds
     }

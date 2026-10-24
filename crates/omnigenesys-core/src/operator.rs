@@ -16,7 +16,7 @@ use crate::{
     bounds::Bounds,
     condition::{CompiledCondition, Condition, ConditionError, PreparedCondition},
     grid::{Grid, GridError, LayerId},
-    layer::{Layer, OutOfBounds},
+    layer::{Layer, LayerKind, OutOfBounds},
     rng::StepRng,
     tile::{TileError, TileId, TileRegistry},
 };
@@ -237,7 +237,7 @@ impl<'a> BuildContext<'a> {
 
     /// Declares a live read of `layer`, `reach` cells around each cell.
     pub fn read(&mut self, layer: &str, reach: Reach) -> Result<ReadHandle, BuildError> {
-        let id = self.grid.layer_id(layer)?;
+        let id = self.layer_of(layer, LayerKind::Tiles)?;
         let reach = self.normalize(reach);
         self.access.add_read(id, reach);
         Ok(ReadHandle { layer: id })
@@ -251,7 +251,7 @@ impl<'a> BuildContext<'a> {
     /// Declares a write to `layer` that can land up to `reach` cells away
     /// from the cell being decided (a stamp that crosses a chunk border).
     pub fn write_reaching(&mut self, layer: &str, reach: Reach) -> Result<WriteHandle, BuildError> {
-        let id = self.grid.layer_id(layer)?;
+        let id = self.layer_of(layer, LayerKind::Tiles)?;
         let reach = self.normalize(reach);
         self.access.add_write(id, reach);
         Ok(WriteHandle { layer: id })
@@ -264,11 +264,59 @@ impl<'a> BuildContext<'a> {
     /// layer through [`GridView::tiles_mut`] before writing any of it, and
     /// keeps its own double buffer (PLANNING §2.7 item 15, §2.8).
     pub fn read_write(&mut self, layer: &str, reach: Reach) -> Result<WriteHandle, BuildError> {
-        let id = self.grid.layer_id(layer)?;
+        let id = self.layer_of(layer, LayerKind::Tiles)?;
         let reach = self.normalize(reach);
         self.access.add_snapshot_read(id, reach);
         self.access.add_write(id, Reach::ZERO);
         Ok(WriteHandle { layer: id })
+    }
+
+    /// Declares a live read of the scalar layer `layer`, `reach` cells
+    /// around each cell.
+    pub fn read_scalar(&mut self, layer: &str, reach: Reach) -> Result<ReadHandle, BuildError> {
+        let id = self.layer_of(layer, LayerKind::Scalar)?;
+        let reach = self.normalize(reach);
+        self.access.add_read(id, reach);
+        Ok(ReadHandle { layer: id })
+    }
+
+    /// Declares a write to the scalar layer `layer`, at the cell only.
+    pub fn write_scalar(&mut self, layer: &str) -> Result<WriteHandle, BuildError> {
+        let id = self.layer_of(layer, LayerKind::Scalar)?;
+        self.access.add_write(id, Reach::ZERO);
+        Ok(WriteHandle { layer: id })
+    }
+
+    /// Declares a synchronous update of the scalar layer `layer`, as
+    /// [`read_write`](Self::read_write) does for tiles: each cell's new value
+    /// comes from the layer as the step found it, up to `reach` around.
+    pub fn read_write_scalar(
+        &mut self,
+        layer: &str,
+        reach: Reach,
+    ) -> Result<WriteHandle, BuildError> {
+        let id = self.layer_of(layer, LayerKind::Scalar)?;
+        let reach = self.normalize(reach);
+        self.access.add_snapshot_read(id, reach);
+        self.access.add_write(id, Reach::ZERO);
+        Ok(WriteHandle { layer: id })
+    }
+
+    /// The layer `name`, which must be of `kind`: a tile operator pointed at
+    /// a scalar layer fails here, when the pipeline is built, not halfway
+    /// through a run.
+    fn layer_of(&self, name: &str, kind: LayerKind) -> Result<LayerId, BuildError> {
+        let id = self.grid.layer_id(name)?;
+        let found = self.grid.kind(id)?;
+        if found != kind {
+            return Err(GridError::WrongLayerKind {
+                name: name.to_string(),
+                expected: kind,
+                found,
+            }
+            .into());
+        }
+        Ok(id)
     }
 
     pub fn tile(&self, name: &str) -> Result<TileId, BuildError> {
@@ -392,6 +440,36 @@ impl GridView<'_> {
             return Err(OpError::Undeclared { layer: h.layer });
         }
         Ok(self.grid.tiles_mut(h.layer)?)
+    }
+
+    pub fn scalars(&self, h: ReadHandle) -> Result<&Layer<f32>, OpError> {
+        if !self.access.reads_live(h.layer) {
+            return Err(OpError::Undeclared { layer: h.layer });
+        }
+        Ok(self.grid.scalars(h.layer)?)
+    }
+
+    pub fn scalars_mut(&mut self, h: WriteHandle) -> Result<&mut Layer<f32>, OpError> {
+        if !self.access.writes(h.layer) {
+            return Err(OpError::Undeclared { layer: h.layer });
+        }
+        Ok(self.grid.scalars_mut(h.layer)?)
+    }
+
+    /// One layer read and another written, at once: a scalar operator
+    /// reading a field to write tiles (classify). Fails on the same layer.
+    pub fn scalars_and_tiles_mut(
+        &mut self,
+        read: ReadHandle,
+        write: WriteHandle,
+    ) -> Result<(&Layer<f32>, &mut Layer<TileId>), OpError> {
+        if !self.access.reads_live(read.layer) {
+            return Err(OpError::Undeclared { layer: read.layer });
+        }
+        if !self.access.writes(write.layer) {
+            return Err(OpError::Undeclared { layer: write.layer });
+        }
+        Ok(self.grid.scalars_and_tiles_mut(read.layer, write.layer)?)
     }
 
     /// A snapshot of what the condition reads, taken now.

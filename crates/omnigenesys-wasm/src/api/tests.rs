@@ -34,18 +34,26 @@ fn operators_list_each_with_a_plain_config_schema() {
         .iter()
         .map(|op| op["name"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        names,
-        [
-            "CellularAutomaton",
-            "Fill",
-            "FillBorder",
-            "FillSmallRegions",
-            "KeepLargestRegion",
-            "Scatter"
-        ]
-    );
-    let scatter = &o["operators"][5];
+    for name in [
+        "CellularAutomaton",
+        "Classify",
+        "Falloff",
+        "Fill",
+        "Noise",
+        "Scatter",
+    ] {
+        assert!(names.contains(&name), "{name} in {names:?}");
+    }
+    let by_name = |n: &str| {
+        o["operators"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|op| op["name"] == n)
+            .unwrap()
+            .clone()
+    };
+    let scatter = &by_name("Scatter");
     assert_eq!(scatter["dimensions"], "any");
     assert_eq!(scatter["scope"], "local");
     // Plain: `chance` is a number, not "a number or a $param".
@@ -55,7 +63,7 @@ fn operators_list_each_with_a_plain_config_schema() {
         .map(|r| &o["definitions"][r.trim_start_matches("#/definitions/")])
         .unwrap_or(config);
     assert_eq!(target["properties"]["chance"]["type"], "number");
-    assert_eq!(o["operators"][4]["scope"], "global");
+    assert_eq!(by_name("KeepLargestRegion")["scope"], "global");
 }
 
 #[test]
@@ -229,4 +237,58 @@ fn failures_come_back_as_errors_to_show() {
             .unwrap(),
     );
     assert!(!e["errors"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn step_by_step_is_the_same_map_as_all_at_once() {
+    let whole = generate(&registry(), CAVE, &[], None, None).unwrap();
+    let mut g = start(&registry(), CAVE, &[], None, None).unwrap();
+    assert_eq!((g.steps(), g.done()), (5, 0));
+    assert_eq!(g.step_id(2), Some("smooth"));
+    let mut seen = Vec::new();
+    while g.run_next().unwrap() {
+        seen.push(g.composite());
+    }
+    assert_eq!(g.done(), 5);
+    assert!(!g.run_next().unwrap(), "nothing left to run");
+    assert_eq!(g.to_json().unwrap(), whole.to_json().unwrap());
+
+    // The map after step k is the map of the first k steps alone.
+    let spec: Value = serde_json::from_str(CAVE).unwrap();
+    for k in 1..=5 {
+        let mut cut = spec.clone();
+        cut["steps"].as_array_mut().unwrap().truncate(k);
+        let alone = generate(&registry(), &cut.to_string(), &[], None, None).unwrap();
+        assert_eq!(seen[k - 1], alone.composite(), "after step {k}");
+    }
+}
+
+#[test]
+fn a_failing_step_is_reported_when_it_runs() {
+    let strict = CAVE.replacen("\"min_cells\": 300", "\"min_cells\": 100000", 1);
+    let mut g = start(&registry(), &strict, &[], None, None).unwrap();
+    for _ in 0..3 {
+        assert!(g.run_next().unwrap());
+    }
+    let e = parse(&g.run_next().unwrap_err());
+    assert_eq!(e["errors"][0]["step_id"], "one_cave");
+    assert_eq!(g.done(), 3, "the failed step does not count");
+}
+
+#[test]
+fn reading_a_layer_nothing_wrote_yet_is_a_warning() {
+    // `trees` reads terrain; moved first, nothing has written it yet.
+    let mut spec: Value = serde_json::from_str(ISLAND).unwrap();
+    let steps = spec["steps"].as_array_mut().unwrap();
+    let trees = steps.pop().unwrap();
+    steps.insert(0, trees);
+    let v = parse(&validate(&registry(), &spec.to_string(), &[]));
+    assert_eq!(v["ok"], true);
+    let w = &v["warnings"][0];
+    assert_eq!(w["step_id"], "trees");
+    assert_eq!(w["pointer"], "/steps/0");
+    assert!(w["message"].as_str().unwrap().contains("'terrain'"), "{w}");
+    // In the right order, no such warning.
+    let v = parse(&validate(&registry(), ISLAND, &[]));
+    assert_eq!(v["warnings"], json!([]));
 }

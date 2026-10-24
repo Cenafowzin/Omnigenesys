@@ -99,14 +99,17 @@ fn the_dispatch_names_every_operator() {
         step["properties"]["operator"]["enum"],
         json!([
             "CellularAutomaton",
+            "Classify",
+            "Falloff",
             "Fill",
             "FillBorder",
             "FillSmallRegions",
             "KeepLargestRegion",
+            "Noise",
             "Scatter"
         ])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 6);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 9);
 }
 
 const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");

@@ -19,13 +19,16 @@
 //!   "size": [4, 2, 1],
 //!   "tiles": ["empty", "floor", "wall"],
 //!   "layers": [
-//!     {"name": "terrain", "kind": "tiles", "encoding": "rle", "data": [[1,6],[2,2]]}
+//!     {"name": "terrain", "kind": "tiles", "encoding": "rle", "data": [[1,6],[2,2]]},
+//!     {"name": "height", "kind": "scalar", "encoding": "dense", "data": [0.5, 0.25, 1, 0, 0.125, 0.75, 0.3, 0.6]}
 //!   ],
 //!   "objects": [],
 //!   "markers": []
 //! }
 //! ```
 //!
+//! A scalar layer is always dense, each value the shortest decimal that
+//! reads back as the same f32; NaN and infinity are an error, not a value.
 //! Cells go x fastest, then y, then z. `tiles[0]` is always `"empty"`; the
 //! others follow in the order the pipeline declared them.
 
@@ -35,6 +38,7 @@ use thiserror::Error;
 
 use crate::{
     grid::{Grid, GridError},
+    layer::LayerKind,
     spec::ParamValue,
     tile::{TileId, TileRegistry},
 };
@@ -89,6 +93,12 @@ pub enum ExportError {
     },
     #[error("param '{name}' is {value}, which JSON cannot hold")]
     NonFiniteParam { name: String, value: f64 },
+    #[error("layer '{layer}' has {value} at cell {index}, which JSON cannot hold")]
+    NonFiniteCell {
+        layer: String,
+        index: usize,
+        value: f32,
+    },
 }
 
 /// Writes the map as output v2. Writes go out in 64 KiB blocks, so a bare
@@ -174,10 +184,14 @@ enum Choice {
 }
 
 /// A layer ready to write: its cells and how to encode them.
-struct Planned<'g> {
-    name: &'g str,
-    cells: &'g [TileId],
-    choice: Choice,
+enum Planned<'g> {
+    Tiles {
+        name: &'g str,
+        cells: &'g [TileId],
+        choice: Choice,
+    },
+    /// Always dense: a float rarely repeats exactly, so runs do not pay.
+    Scalar { name: &'g str, cells: &'g [f32] },
 }
 
 fn plan<'g>(
@@ -187,7 +201,20 @@ fn plan<'g>(
 ) -> Result<Vec<Planned<'g>>, ExportError> {
     let mut layers = Vec::new();
     for name in grid.names() {
-        let cells = grid.tiles(grid.layer_id(name)?)?.as_slice();
+        let id = grid.layer_id(name)?;
+        if grid.kind(id)? == LayerKind::Scalar {
+            let cells = grid.scalars(id)?.as_slice();
+            if let Some(i) = cells.iter().position(|v| !v.is_finite()) {
+                return Err(ExportError::NonFiniteCell {
+                    layer: name.to_string(),
+                    index: i,
+                    value: cells[i],
+                });
+            }
+            layers.push(Planned::Scalar { name, cells });
+            continue;
+        }
+        let cells = grid.tiles(id)?.as_slice();
         let (runs, max) = scan(cells);
         if let Some(max) = max
             && max.0 as usize >= tiles.len()
@@ -203,7 +230,7 @@ fn plan<'g>(
             Encoding::Auto | Encoding::Dense => Choice::Dense,
             Encoding::Rle => Choice::Rle,
         };
-        layers.push(Planned {
+        layers.push(Planned::Tiles {
             name,
             cells,
             choice,
@@ -328,23 +355,56 @@ impl<W: Write> Writer<W> {
     }
 
     fn layer(&mut self, layer: &Planned<'_>) -> io::Result<()> {
-        let rle = match layer.choice {
+        let (name, cells, choice) = match *layer {
+            Planned::Tiles {
+                name,
+                cells,
+                choice,
+            } => (name, cells, choice),
+            Planned::Scalar { name, cells } => return self.scalar_layer(name, cells),
+        };
+        let rle = match choice {
             Choice::Dense => false,
             Choice::Rle => {
-                self.encode_rle(layer.cells);
+                self.encode_rle(cells);
                 true
             }
-            Choice::Smaller => self.encode_rle(layer.cells) > self.scratch.len(),
+            Choice::Smaller => self.encode_rle(cells) > self.scratch.len(),
         };
         self.raw("{\"name\": ");
-        self.string(layer.name);
+        self.string(name);
         self.raw(", \"kind\": \"tiles\", \"encoding\": ");
         self.raw(if rle { "\"rle\"" } else { "\"dense\"" });
         self.raw(", \"data\": [");
         if rle {
             self.emit_scratch()?;
         } else {
-            self.dense(layer.cells)?;
+            self.dense(cells)?;
+        }
+        self.raw("]}");
+        Ok(())
+    }
+
+    /// A scalar layer: each value as the shortest decimal that reads back
+    /// as the same f32 (Rust's own formatting; never in exponent form).
+    fn scalar_layer(&mut self, name: &str, cells: &[f32]) -> io::Result<()> {
+        use std::fmt::Write as _;
+        self.raw("{\"name\": ");
+        self.string(name);
+        self.raw(", \"kind\": \"scalar\", \"encoding\": \"dense\", \"data\": [");
+        let mut text = String::new();
+        for (i, v) in cells.iter().enumerate() {
+            text.clear();
+            // -0.0 and 0.0 are the same height.
+            let v = if *v == 0.0 { 0.0 } else { *v };
+            let _ = write!(text, "{v}");
+            if i > 0 {
+                self.raw(",");
+            }
+            self.raw(&text);
+            if self.buf.len() >= BLOCK {
+                self.spill()?;
+            }
         }
         self.raw("]}");
         Ok(())

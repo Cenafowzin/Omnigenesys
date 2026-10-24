@@ -6,11 +6,14 @@
 //! binary anyway, and the download needs the text. Positions in diagnostics
 //! are UTF-16 offsets, the unit of JavaScript strings and of web editors.
 
+use std::collections::HashSet;
+
 use omnigenesys_core::{
     access::Reach,
     export::{self, Encoding, Provenance},
     grid::Grid,
     operator::{Dimensions, Registry, Scope},
+    pipeline::Pipeline,
     spec::{self, Built, Diagnostic, PipelineSpec, Span},
     tile::{TileId, TileRegistry},
 };
@@ -80,8 +83,42 @@ fn report(
     });
     if let Some((spec, built)) = built {
         out["steps"] = steps(spec, built);
+        if let Value::Array(list) = &mut out["warnings"] {
+            list.extend(unwritten_reads(spec, built));
+        }
     }
     out.to_string()
+}
+
+/// A step that reads a layer no earlier step wrote: it sees it empty, which
+/// is rarely what was meant (a step moved above the one it depends on).
+fn unwritten_reads(spec: &PipelineSpec, built: &Built) -> Vec<Value> {
+    let mut written = HashSet::new();
+    let mut out = Vec::new();
+    for (i, s) in spec.steps.iter().enumerate().filter(|(_, s)| s.enabled) {
+        let Some(access) = built.pipeline.access(&s.id) else {
+            continue;
+        };
+        for l in access.layers() {
+            if access.read_reach(l.layer).is_some() && !written.contains(&l.layer) {
+                let name = built.grid.layer_name(l.layer).unwrap_or("?");
+                out.push(json!({
+                    "message": format!(
+                        "reads layer '{name}', but no step before it writes there: it is still empty"
+                    ),
+                    "step_id": s.id, "pointer": format!("/steps/{i}"), "span": null, "note": null,
+                }));
+            }
+        }
+        written.extend(
+            access
+                .layers()
+                .iter()
+                .filter(|l| l.write.is_some())
+                .map(|l| l.layer),
+        );
+    }
+    out
 }
 
 fn diagnostic(text: &str, d: &Diagnostic) -> Value {
@@ -139,24 +176,32 @@ fn steps(spec: &PipelineSpec, built: &Built) -> Value {
     Value::Array(list)
 }
 
-/// A map made from a pipeline: the grid, its tiles, and how it was made.
-pub struct Map {
+/// A map being made from a pipeline, one step at a time or all at once:
+/// the grid as the steps so far left it, its tiles, and how it was made.
+pub struct Generation {
     grid: Grid,
     tiles: TileRegistry,
+    pipeline: Pipeline,
     provenance: Provenance,
+    salt: String,
+    /// Every step's id in the file, enabled or not: errors point at
+    /// `/steps/<index in the file>`.
+    file_ids: Vec<String>,
+    /// Steps already run.
+    done: usize,
 }
 
-/// Runs a pipeline. `seed` and `salt` override the file's; a seed is
-/// required from one of the two (the app draws one when the file has
-/// none, so it can show which). On failure, the JSON of
-/// `{"errors": [...]}`, in the shape of [`validate`]'s.
-pub fn generate(
+/// Parses and builds a pipeline, ready to run step by step. `seed` and
+/// `salt` override the file's; a seed is required from one of the two (the
+/// app draws one when the file has none, so it can show which). On failure,
+/// the JSON of `{"errors": [...]}`, in the shape of [`validate`]'s.
+pub fn start(
     registry: &Registry,
     text: &str,
     params: &[(String, String)],
     seed: Option<u64>,
     salt: Option<&str>,
-) -> Result<Map, String> {
+) -> Result<Generation, String> {
     let fail = |errors: &[Diagnostic]| {
         let list: Vec<Value> = errors.iter().map(|d| diagnostic(text, d)).collect();
         json!({ "errors": list }).to_string()
@@ -164,42 +209,87 @@ pub fn generate(
     let parsed = PipelineSpec::parse_with(text, params).map_err(|e| fail(&e))?;
     let spec = parsed.spec;
     let Built {
-        mut grid,
+        grid,
         tiles,
         pipeline,
     } = spec.build(registry).map_err(|e| fail(&e))?;
-    let message = |pointer: &str, step_id: Option<&str>, message: String| {
-        json!({"errors": [{
-            "message": message, "step_id": step_id, "pointer": pointer,
-            "span": null, "note": null,
-        }]})
-        .to_string()
-    };
     let Some(seed) = seed.or(spec.seed) else {
-        return Err(message(
+        return Err(error_json(
             "/seed",
             None,
-            "the pipeline has no seed: give one".to_string(),
+            "the pipeline has no seed: give one",
         ));
     };
     let salt = salt.map_or_else(|| spec.salt.clone(), str::to_string);
-    pipeline.run(&mut grid, &salt, seed).map_err(|e| {
-        let at = spec
-            .steps
-            .iter()
-            .position(|s| s.id == e.step_id)
-            .map_or_else(String::new, |i| format!("/steps/{i}"));
-        message(&at, Some(&e.step_id), e.error.to_string())
-    })?;
-    let provenance = spec.provenance(seed, &salt);
-    Ok(Map {
+    Ok(Generation {
         grid,
         tiles,
-        provenance,
+        pipeline,
+        provenance: spec.provenance(seed, &salt),
+        salt,
+        file_ids: spec.steps.iter().map(|s| s.id.clone()).collect(),
+        done: 0,
     })
 }
 
-impl Map {
+/// [`start`], then every step.
+pub fn generate(
+    registry: &Registry,
+    text: &str,
+    params: &[(String, String)],
+    seed: Option<u64>,
+    salt: Option<&str>,
+) -> Result<Generation, String> {
+    let mut g = start(registry, text, params, seed, salt)?;
+    while g.run_next()? {}
+    Ok(g)
+}
+
+fn error_json(pointer: &str, step_id: Option<&str>, message: &str) -> String {
+    json!({"errors": [{
+        "message": message, "step_id": step_id, "pointer": pointer,
+        "span": null, "note": null,
+    }]})
+    .to_string()
+}
+
+impl Generation {
+    /// Runs the next step; `Ok(false)` when every step has run. On a
+    /// failing step, the JSON of `{"errors": [...]}`, pointing at it.
+    pub fn run_next(&mut self) -> Result<bool, String> {
+        if self.done == self.pipeline.len() {
+            return Ok(false);
+        }
+        let seed = self.provenance.seed;
+        self.pipeline
+            .run_step(self.done, &mut self.grid, &self.salt, seed)
+            .map_err(|e| {
+                let at = self
+                    .file_ids
+                    .iter()
+                    .position(|id| *id == e.step_id)
+                    .map_or_else(String::new, |i| format!("/steps/{i}"));
+                error_json(&at, Some(&e.step_id), &e.error.to_string())
+            })?;
+        self.done += 1;
+        Ok(true)
+    }
+
+    /// Steps that run (the enabled ones).
+    pub fn steps(&self) -> usize {
+        self.pipeline.len()
+    }
+
+    /// Steps already run.
+    pub fn done(&self) -> usize {
+        self.done
+    }
+
+    /// The id of the `i`-th step that runs.
+    pub fn step_id(&self, i: usize) -> Option<&str> {
+        self.pipeline.step_id(i)
+    }
+
     pub fn size(&self) -> (u32, u32, u32) {
         let s = self.grid.bounds().size;
         (s.width, s.height, s.depth)
@@ -219,12 +309,29 @@ impl Map {
         self.grid.names().map(str::to_string).collect()
     }
 
-    /// One layer's tile ids, x fastest, then y, then z. `None` for a name
-    /// the map does not have.
+    /// Each layer's kind, in the same order: "tiles" or "scalar".
+    pub fn kinds(&self) -> Vec<String> {
+        self.grid
+            .names()
+            .filter_map(|n| self.grid.layer_id(n).ok())
+            .filter_map(|id| self.grid.kind(id).ok())
+            .map(|k| k.to_string())
+            .collect()
+    }
+
+    /// One tile layer's ids, x fastest, then y, then z. `None` for a name
+    /// the map does not have, or a scalar layer.
     pub fn layer(&self, name: &str) -> Option<Vec<u16>> {
         let id = self.grid.layer_id(name).ok()?;
         let layer = self.grid.tiles(id).ok()?;
         Some(layer.as_slice().iter().map(|t| t.index()).collect())
+    }
+
+    /// One scalar layer's values, in the same order. `None` for a name the
+    /// map does not have, or a tile layer.
+    pub fn scalar(&self, name: &str) -> Option<Vec<f32>> {
+        let id = self.grid.layer_id(name).ok()?;
+        Some(self.grid.scalars(id).ok()?.as_slice().to_vec())
     }
 
     /// Every layer drawn over the one before it: for each cell, the tile of

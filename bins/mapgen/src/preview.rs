@@ -16,6 +16,7 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use omnigenesys_core::grid::Grid;
+use omnigenesys_core::layer::LayerKind;
 use omnigenesys_core::tile::{TileId, TileRegistry};
 
 /// Largest side of the image when the scale is not given.
@@ -131,6 +132,10 @@ fn compose(grid: &Grid) -> Result<Vec<TileId>, String> {
     let mut out: Vec<TileId> = Vec::new();
     for name in grid.names() {
         let id = grid.layer_id(name).map_err(|e| e.to_string())?;
+        // Scalar layers are fields, not tiles: the preview draws tiles.
+        if grid.kind(id).map_err(|e| e.to_string())? != LayerKind::Tiles {
+            continue;
+        }
         let layer = grid.tiles(id).map_err(|e| e.to_string())?.as_slice();
         if out.is_empty() {
             out = layer.to_vec();

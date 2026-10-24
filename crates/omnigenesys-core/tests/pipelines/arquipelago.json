@@ -1,0 +1,88 @@
+{
+  "version": 2,
+  "description": "Arquipélago: noise fBm com falloff fraco e mar alto; as ilhotas de menos de 6 células somem.",
+  "seed": 512,
+  "size": {
+    "width": 64,
+    "height": 40
+  },
+  "layers": [
+    "terreno",
+    {
+      "name": "altura",
+      "kind": "scalar"
+    }
+  ],
+  "tiles": [
+    "mar",
+    "areia",
+    "grama",
+    "mata",
+    "pedra"
+  ],
+  "steps": [
+    {
+      "id": "relevo",
+      "operator": "Noise",
+      "config": {
+        "layer": "altura",
+        "wavelength": 22,
+        "octaves": 3
+      }
+    },
+    {
+      "id": "costa",
+      "operator": "Falloff",
+      "config": {
+        "layer": "altura",
+        "shape": "square",
+        "mix": 0.25
+      }
+    },
+    {
+      "id": "biomas",
+      "operator": "Classify",
+      "config": {
+        "from": "altura",
+        "layer": "terreno",
+        "bands": [
+          {
+            "max": 0.56,
+            "tile": "mar"
+          },
+          {
+            "max": 0.585,
+            "tile": "areia"
+          },
+          {
+            "max": 0.66,
+            "tile": "grama"
+          },
+          {
+            "max": 0.74,
+            "tile": "mata"
+          },
+          {
+            "tile": "pedra"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sem_ilhotas",
+      "operator": "FillSmallRegions",
+      "config": {
+        "layer": "terreno",
+        "region": [
+          "areia",
+          "grama",
+          "mata",
+          "pedra"
+        ],
+        "fill": "mar",
+        "connectivity": "orthogonal",
+        "below": 6
+      }
+    }
+  ]
+}

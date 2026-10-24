@@ -1,0 +1,77 @@
+{
+  "version": 2,
+  "description": "Ilha: noise fBm puxado para baixo nas bordas por um falloff redondo, pintado por faixas de altura.",
+  "seed": 512,
+  "size": {
+    "width": 64,
+    "height": 40
+  },
+  "layers": [
+    "terreno",
+    {
+      "name": "altura",
+      "kind": "scalar"
+    }
+  ],
+  "tiles": [
+    "mar",
+    "areia",
+    "grama",
+    "mata",
+    "pedra",
+    "neve"
+  ],
+  "steps": [
+    {
+      "id": "relevo",
+      "operator": "Noise",
+      "config": {
+        "layer": "altura",
+        "wavelength": 48,
+        "octaves": 5
+      }
+    },
+    {
+      "id": "costa",
+      "operator": "Falloff",
+      "config": {
+        "layer": "altura",
+        "shape": "round",
+        "mix": 0.55
+      }
+    },
+    {
+      "id": "biomas",
+      "operator": "Classify",
+      "config": {
+        "from": "altura",
+        "layer": "terreno",
+        "bands": [
+          {
+            "max": 0.42,
+            "tile": "mar"
+          },
+          {
+            "max": 0.45,
+            "tile": "areia"
+          },
+          {
+            "max": 0.58,
+            "tile": "grama"
+          },
+          {
+            "max": 0.68,
+            "tile": "mata"
+          },
+          {
+            "max": 0.78,
+            "tile": "pedra"
+          },
+          {
+            "tile": "neve"
+          }
+        ]
+      }
+    }
+  ]
+}

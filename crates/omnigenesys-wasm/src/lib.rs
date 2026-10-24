@@ -2,12 +2,16 @@
 //! visitor's machine: the server only hands out files.
 //!
 //! ```js
-//! import init, { validate, generate } from "./omnigenesys_wasm.js";
+//! import init, { validate, start, generate } from "./omnigenesys_wasm.js";
 //! await init();
-//! const check = JSON.parse(validate(text, "{}"));   // {ok, errors, warnings, steps}
-//! const map = generate(text, "{}", 512n, undefined); // throws {errors} on failure
-//! const [w, h, d] = map.size();
-//! const cells = map.composite();                     // Uint16Array, x fastest
+//! const check = JSON.parse(validate(text, "{}"));  // {ok, errors, warnings, steps}
+//!
+//! const g = start(text, "{}", 512n);                // throws {errors}
+//! while (g.next()) {                                // one step; throws {errors}
+//!   thumbnails.push(g.composite());                 // the map after it
+//! }
+//! const file = g.toJson();
+//! // or, all at once: const g = generate(text, "{}", 512n);
 //! ```
 //!
 //! Run it in a Web Worker for big maps: a call blocks the thread it is on.
@@ -21,7 +25,7 @@ pub mod api;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(start)]
-fn start() {
+fn start_up() {
     // A Rust panic shows in the console with its message, not as
     // "unreachable executed".
     console_error_panic_hook::set_once();
@@ -30,6 +34,11 @@ fn start() {
 fn registry() -> &'static Registry {
     static REGISTRY: OnceLock<Registry> = OnceLock::new();
     REGISTRY.get_or_init(Registry::with_builtins)
+}
+
+/// `{errors: [...]}` as a JavaScript object, from its JSON.
+fn errors(json: &str) -> JsValue {
+    js_sys::JSON::parse(json).unwrap_or_else(|_| JsValue::from_str(json))
 }
 
 /// The JSON Schema of a pipeline file (text). Same for the whole session.
@@ -55,28 +64,67 @@ pub fn validate(text: &str, params: &str) -> Result<String, JsError> {
     Ok(api::validate(registry(), text, &params))
 }
 
-/// Runs a pipeline. `seed` (a BigInt) and `salt` override the file's.
-/// Throws `{errors: [...]}` when the pipeline cannot run.
+/// Builds a pipeline, ready to run step by step with `next()`. `seed` (a
+/// BigInt) and `salt` override the file's. Throws `{errors: [...]}` when it
+/// cannot be built.
+#[wasm_bindgen]
+pub fn start(
+    text: &str,
+    params: &str,
+    seed: Option<u64>,
+    salt: Option<String>,
+) -> Result<Generation, JsValue> {
+    let params = api::params(params).map_err(|e| JsValue::from(JsError::new(&e)))?;
+    api::start(registry(), text, &params, seed, salt.as_deref())
+        .map(Generation)
+        .map_err(|e| errors(&e))
+}
+
+/// `start`, then every step.
 #[wasm_bindgen]
 pub fn generate(
     text: &str,
     params: &str,
     seed: Option<u64>,
     salt: Option<String>,
-) -> Result<Map, JsValue> {
+) -> Result<Generation, JsValue> {
     let params = api::params(params).map_err(|e| JsValue::from(JsError::new(&e)))?;
     api::generate(registry(), text, &params, seed, salt.as_deref())
-        .map(Map)
-        .map_err(|json| js_sys::JSON::parse(&json).unwrap_or_else(|_| JsValue::from_str(&json)))
+        .map(Generation)
+        .map_err(|e| errors(&e))
 }
 
-/// A generated map. Arrays come out as copies, safe to keep and to send
-/// to another thread. `GeneratedMap` in JavaScript, where `Map` is taken.
-#[wasm_bindgen(js_name = GeneratedMap)]
-pub struct Map(api::Map);
+/// A map being made. The map getters show it as the steps run so far left
+/// it. Arrays come out as copies, safe to keep and to send to another
+/// thread.
+#[wasm_bindgen]
+pub struct Generation(api::Generation);
 
-#[wasm_bindgen(js_class = GeneratedMap)]
-impl Map {
+#[wasm_bindgen]
+impl Generation {
+    /// Runs the next step; `false` when all have run. Throws `{errors}`
+    /// pointing at a step that fails.
+    #[wasm_bindgen(js_name = next)]
+    pub fn run_next(&mut self) -> Result<bool, JsValue> {
+        self.0.run_next().map_err(|e| errors(&e))
+    }
+
+    /// Steps that run (the enabled ones).
+    pub fn steps(&self) -> usize {
+        self.0.steps()
+    }
+
+    /// Steps already run.
+    pub fn done(&self) -> usize {
+        self.0.done()
+    }
+
+    /// The id of the `i`-th step that runs.
+    #[wasm_bindgen(js_name = stepId)]
+    pub fn step_id(&self, i: usize) -> Option<String> {
+        self.0.step_id(i).map(str::to_string)
+    }
+
     /// `[width, height, depth]`.
     pub fn size(&self) -> Vec<u32> {
         let (w, h, d) = self.0.size();
@@ -96,11 +144,23 @@ impl Map {
         self.0.layers()
     }
 
-    /// One layer's tile ids, x fastest, then y, then z.
+    /// Each layer's kind, in the order of `layers()`: "tiles" or "scalar".
+    pub fn kinds(&self) -> Vec<String> {
+        self.0.kinds()
+    }
+
+    /// One tile layer's ids, x fastest, then y, then z.
     pub fn layer(&self, name: &str) -> Result<Vec<u16>, JsError> {
         self.0
             .layer(name)
-            .ok_or_else(|| JsError::new(&format!("no layer '{name}'")))
+            .ok_or_else(|| JsError::new(&format!("no tile layer '{name}'")))
+    }
+
+    /// One scalar layer's values, x fastest, then y, then z.
+    pub fn scalar(&self, name: &str) -> Result<Vec<f32>, JsError> {
+        self.0
+            .scalar(name)
+            .ok_or_else(|| JsError::new(&format!("no scalar layer '{name}'")))
     }
 
     /// Every layer drawn over the one before it.

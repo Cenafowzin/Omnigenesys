@@ -12,6 +12,10 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 const ISLAND: &str = include_str!("../../omnigenesys-core/tests/pipelines/island.json");
 const CAVE: &str = include_str!("../../omnigenesys-core/tests/pipelines/cave.json");
+// Noise: floating point, the part most likely to drift between targets.
+// The file includes every height as written (f32, shortest decimal).
+const ISLAND_NOISE: &str = include_str!("../../omnigenesys-core/tests/pipelines/ilha.json");
+const ARCHIPELAGO: &str = include_str!("../../omnigenesys-core/tests/pipelines/arquipelago.json");
 
 /// A 3D map through every operator that runs in 3D.
 const VOLUME: &str = r#"{
@@ -38,8 +42,14 @@ fn fingerprint(text: &str) -> u64 {
     };
     eat(map.to_json().unwrap().as_bytes());
     for name in map.layers() {
-        for id in map.layer(&name).unwrap() {
-            eat(&id.to_le_bytes());
+        match map.layer(&name) {
+            Some(ids) => ids.iter().for_each(|id| eat(&id.to_le_bytes())),
+            // A scalar layer: its exact bits, not just its text.
+            None => map
+                .scalar(&name)
+                .unwrap()
+                .iter()
+                .for_each(|v| eat(&v.to_bits().to_le_bytes())),
         }
     }
     h
@@ -61,4 +71,16 @@ fn cave() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn volume() {
     assert_eq!(fingerprint(VOLUME), 5_762_542_940_651_055_300);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn island_from_noise() {
+    assert_eq!(fingerprint(ISLAND_NOISE), 8_982_297_859_115_373_513);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn archipelago() {
+    assert_eq!(fingerprint(ARCHIPELAGO), 14_932_835_501_811_789_232);
 }
