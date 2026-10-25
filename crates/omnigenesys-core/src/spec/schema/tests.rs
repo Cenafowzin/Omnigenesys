@@ -103,16 +103,18 @@ fn the_dispatch_names_every_operator() {
             "Check",
             "Combine",
             "ConnectRooms",
+            "Curve",
             "Fill",
-            "Gradient",
+            "LinearGradient",
             "Noise",
             "PlaceRooms",
+            "RadialGradient",
             "RegionSize",
             "RoomGrid",
             "Scatter"
         ])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 12);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 14);
 }
 
 const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");

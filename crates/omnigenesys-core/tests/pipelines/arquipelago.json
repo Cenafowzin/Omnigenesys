@@ -40,23 +40,43 @@
     },
     {
       "id": "centro",
-      "operator": "Gradient",
-      "description": "1 no centro do mapa, 0 nas bordas.",
+      "operator": "RadialGradient",
+      "description": "Distância do centro: 0 no meio, 1 numa borda quase quadrada que toca os lados do mapa.",
       "config": {
         "layer": "distancia",
-        "shape": "square",
+        "shape": 0.75
+      }
+    },
+    {
+      "id": "encosta",
+      "operator": "Curve",
+      "description": "Eleva a distância ao quadrado e inverte: 1 no centro, caindo devagar perto do meio e depressa perto da borda.",
+      "config": {
+        "input": "distancia",
+        "layer": "distancia",
+        "curve": {
+          "kind": "power",
+          "exponent": 2
+        },
         "invert": true
       }
     },
     {
       "id": "costa",
       "operator": "Combine",
-      "description": "Puxa a altura em direção ao gradiente: alta no centro, baixa nas bordas.",
+      "description": "Mistura a altura com o gradiente (os pesos somam 1): alta no centro, baixa nas bordas.",
       "config": {
-        "a": "altura",
-        "b": "distancia",
-        "op": "lerp",
-        "mix": 0.25,
+        "inputs": [
+          {
+            "layer": "altura",
+            "weight": 0.75
+          },
+          {
+            "layer": "distancia",
+            "weight": 0.25
+          }
+        ],
+        "op": "sum",
         "layer": "altura",
         "clamp": true
       }

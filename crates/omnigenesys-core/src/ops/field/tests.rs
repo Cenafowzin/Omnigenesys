@@ -1,4 +1,4 @@
-//! Noise, Gradient, Combine and the scalar_in_range and edge_distance
+//! Noise, the gradients, Combine, Curve and the scalar_in_range and edge_distance
 //! conditions, through pipeline files as a user writes them.
 
 use serde_json::{Value, json};
@@ -135,72 +135,329 @@ fn noise_agrees_between_maps_that_overlap() {
     assert_eq!(checked, 20 * 20);
 }
 
+fn radial(config: Value) -> Vec<f32> {
+    let mut config = config;
+    config["layer"] = json!("distancia");
+    let g = run(&pipeline(
+        (8, 6),
+        json!([{"id": "centro", "operator": "RadialGradient", "config": config}]),
+    ));
+    scalars(&g, "distancia")
+}
+
 #[test]
-fn gradient_follows_its_formula() {
-    for (shape, invert) in [("square", false), ("round", false), ("round", true)] {
-        let g = run(&pipeline(
-            (8, 6),
-            json!([{"id": "centro", "operator": "Gradient",
-                    "config": {"layer": "distancia", "shape": shape, "invert": invert}}]),
-        ));
-        let out = scalars(&g, "distancia");
+fn radial_gradient_follows_its_formula() {
+    // The Lp norm written plainly, without the scaling the operator uses.
+    for (shape, p) in [(0.0, 1.0), (0.25, 4.0 / 3.0), (0.5, 2.0), (0.75, 4.0)] {
+        let (cx, cy, rx, ry, turn) = (0.4f64, 0.6, 0.3, 0.45, 30f64);
+        let out = radial(json!({"x": cx, "y": cy, "radius_x": rx, "radius_y": ry,
+                                "rotation": turn, "shape": shape}));
+        let (sin, cos) = turn.to_radians().sin_cos();
         for y in 0..6 {
             for x in 0..8 {
-                let nx = (2.0 * (x as f64 + 0.5) / 8.0 - 1.0) as f32;
-                let ny = (2.0 * (y as f64 + 0.5) / 6.0 - 1.0) as f32;
-                let d = if shape == "square" {
-                    1.0 - (1.0 - nx * nx) * (1.0 - ny * ny)
-                } else {
-                    ((nx * nx + ny * ny) / std::f32::consts::SQRT_2).min(1.0)
-                };
-                let want = if invert { 1.0 - d } else { d };
-                assert_eq!(out[y * 8 + x], want, "{shape} at ({x}, {y})");
+                let px = x as f64 + 0.5 - cx * 8.0;
+                let py = y as f64 + 0.5 - cy * 6.0;
+                let u = (px * cos + py * sin) / (rx * 8.0);
+                let v = (py * cos - px * sin) / (ry * 6.0);
+                let want = (u.abs().powf(p) + v.abs().powf(p)).powf(1.0 / p).min(1.0);
+                let got = f64::from(out[y * 8 + x]);
+                assert!(
+                    (got - want).abs() < 1e-6,
+                    "shape {shape} at ({x}, {y}): {got} vs {want}"
+                );
             }
         }
     }
-    let g = run(&pipeline(
-        (4, 2),
-        json!([{"id": "lado", "operator": "Gradient",
-                "config": {"layer": "distancia", "shape": "horizontal"}}]),
-    ));
+    // Square is the larger of the two distances.
+    let out = radial(json!({"shape": 1}));
+    for y in 0..6 {
+        for x in 0..8 {
+            let u = ((x as f64 + 0.5) - 4.0) / 4.0;
+            let v = ((y as f64 + 0.5) - 3.0) / 3.0;
+            assert_eq!(out[y * 8 + x], u.abs().max(v.abs()) as f32, "({x}, {y})");
+        }
+    }
+}
+
+#[test]
+fn radial_gradient_shapes_and_turns() {
+    // The defaults: a circle in the middle reaching the map's edges.
     assert_eq!(
-        scalars(&g, "distancia"),
-        [0.125, 0.375, 0.625, 0.875, 0.125, 0.375, 0.625, 0.875]
+        radial(json!({})),
+        radial(json!({"x": 0.5, "y": 0.5, "radius_x": 0.5, "radius_y": 0.5,
+                      "rotation": 0, "shape": 0.5}))
     );
+    // From diamond to square no cell gets farther: the shape fills its box.
+    let shapes: Vec<Vec<f32>> = [0.0, 0.3, 0.5, 0.7, 0.9, 1.0]
+        .iter()
+        .map(|s| radial(json!({"shape": s})))
+        .collect();
+    for w in shapes.windows(2) {
+        for (a, b) in w[0].iter().zip(&w[1]) {
+            assert!(*b <= a + 1e-6, "{a} then {b}");
+        }
+    }
+    // A huge exponent is nearly the square, not 0 inside (no underflow).
+    let near = radial(json!({"shape": 0.999}));
+    for (a, b) in near.iter().zip(&shapes[5]) {
+        assert!((a - b).abs() < 0.01, "{a} vs {b}");
+    }
+    // Turned a quarter, the radii swap (on a square map).
+    let square_map = |config: Value| {
+        let mut config = config;
+        config["layer"] = json!("distancia");
+        let g = run(&pipeline(
+            (9, 9),
+            json!([{"id": "centro", "operator": "RadialGradient", "config": config}]),
+        ));
+        scalars(&g, "distancia")
+    };
+    let turned =
+        square_map(json!({"radius_x": 0.2, "radius_y": 0.45, "rotation": 90, "shape": 0.7}));
+    let swapped = square_map(json!({"radius_x": 0.45, "radius_y": 0.2, "shape": 0.7}));
+    for (a, b) in turned.iter().zip(&swapped) {
+        assert!((a - b).abs() < 1e-6, "{a} vs {b}");
+    }
+}
+
+fn linear(size: (u32, u32), config: Value) -> Vec<f32> {
+    let mut config = config;
+    config["layer"] = json!("distancia");
+    let g = run(&pipeline(
+        size,
+        json!([{"id": "rampa", "operator": "LinearGradient", "config": config}]),
+    ));
+    scalars(&g, "distancia")
+}
+
+#[test]
+fn linear_gradient_runs_any_way_across() {
+    let row = [0.125, 0.375, 0.625, 0.875];
+    // 0 left to right, the default; 180 back; 90 top to bottom.
+    assert_eq!(linear((4, 2), json!({})), [row, row].concat());
+    let back = linear((4, 2), json!({"angle": 180}));
+    for (i, v) in back.iter().enumerate() {
+        assert!((v - (1.0 - row[i % 4])).abs() < 1e-6, "{i}: {v}");
+    }
+    let down = linear((2, 4), json!({"angle": 90}));
+    for (i, v) in down.iter().enumerate() {
+        assert!((v - row[i / 2]).abs() < 1e-6, "{i}: {v}");
+    }
+    // At 45° on a square map: the same along each anti-diagonal, rising
+    // from the top-left corner to the bottom-right one.
+    let diag = linear((6, 6), json!({"angle": 45}));
+    for y in 1..6 {
+        for x in 0..5 {
+            assert!((diag[y * 6 + x] - diag[(y - 1) * 6 + x + 1]).abs() < 1e-6);
+        }
+    }
+    assert!(diag[0] < 0.1 && diag[35] > 0.9, "{} {}", diag[0], diag[35]);
+    // `start` and `end`: 0 before, 1 after, a line between.
+    let part = linear((8, 1), json!({"start": 0.25, "end": 0.75}));
+    let want = [0.0, 0.0, 0.125, 0.375, 0.625, 0.875, 1.0, 1.0];
+    for (v, w) in part.iter().zip(want) {
+        assert!((v - w).abs() < 1e-6, "{part:?}");
+    }
+}
+
+/// `curve` over a ramp from 0 to 1 across `width` cells.
+fn curved(width: u32, curve: Value, invert: bool) -> (Vec<f32>, Vec<f32>) {
+    let g = run(&pipeline(
+        (width, 1),
+        json!([{"id": "rampa", "operator": "LinearGradient", "config": {"layer": "distancia"}},
+               {"id": "curva", "operator": "Curve", "config": {
+                   "input": "distancia", "layer": "altura", "curve": curve, "invert": invert}}]),
+    ));
+    (scalars(&g, "distancia"), heights(&g))
+}
+
+#[test]
+fn curve_kinds_follow_their_formulas() {
+    type F = fn(f64) -> f64;
+    let cases: [(Value, F); 7] = [
+        (json!({"kind": "linear"}), |x| x),
+        (json!({"kind": "smooth"}), |x| x * x * (3.0 - 2.0 * x)),
+        (json!({"kind": "smooth", "order": "quintic"}), |x| {
+            6.0 * x.powi(5) - 15.0 * x.powi(4) + 10.0 * x.powi(3)
+        }),
+        (json!({"kind": "power", "exponent": 2.5}), |x| x.powf(2.5)),
+        // Lague's falloff, a = 3 and b = 2.2: the midpoint is b / (1 + b).
+        (
+            json!({"kind": "sigmoid", "exponent": 3, "midpoint": 0.6875}),
+            |x| x.powi(3) / (x.powi(3) + (2.2 - 2.2 * x).powi(3)),
+        ),
+        (json!({"kind": "terrace", "steps": 4}), |x| {
+            (x * 4.0).round() / 4.0
+        }),
+        (
+            json!({"kind": "points", "points": [[0, 0], [0.5, 0.8], [1, 1]],
+                   "interpolation": "linear"}),
+            |x| {
+                if x < 0.5 {
+                    x * 1.6
+                } else {
+                    0.8 + (x - 0.5) * 0.4
+                }
+            },
+        ),
+    ];
+    for (curve, f) in cases {
+        for invert in [false, true] {
+            let (input, out) = curved(11, curve.clone(), invert);
+            for (x, y) in input.iter().zip(&out) {
+                let v = f(f64::from(*x));
+                let want = if invert { 1.0 - v } else { v };
+                assert!(
+                    (f64::from(*y) - want).abs() < 1e-6,
+                    "{curve} {invert} at {x}: {y} vs {want}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn curve_shapes_behave() {
+    // Sigmoid with exponent 1 and midpoint ½ is the line; any exponent
+    // crosses ½ at the midpoint.
+    let (input, out) = curved(11, json!({"kind": "sigmoid", "exponent": 1}), false);
+    for (x, y) in input.iter().zip(&out) {
+        assert!((x - y).abs() < 1e-6);
+    }
+    let (_, out) = curved(1, json!({"kind": "sigmoid", "exponent": 4}), false);
+    assert!((out[0] - 0.5).abs() < 1e-6);
+    // Smooth terraces go back to the line as the smoothness grows.
+    let (input, out) = curved(
+        11,
+        json!({"kind": "terrace", "steps": 3, "smoothness": 1e9}),
+        false,
+    );
+    for (x, y) in input.iter().zip(&out) {
+        assert!((x - y).abs() < 1e-6, "{x} {y}");
+    }
+    // A monotone curve goes through its points and never overshoots them,
+    // where a plain cubic would after the steep rise.
+    let (_, out) = curved(
+        200,
+        json!({"kind": "points", "points": [[0, 0], [0.3, 0.9], [0.6, 1], [1, 1]]}),
+        false,
+    );
+    for w in out.windows(2) {
+        assert!(w[1] >= w[0] - 1e-6, "rises only: {} then {}", w[0], w[1]);
+    }
+    assert!(out.iter().all(|v| (0.0..=1.0).contains(v)));
+    let (_, out) = curved(
+        5,
+        json!({"kind": "points", "points": [[0, 0.2], [0.5, 0.7], [1, 0.2]]}),
+        false,
+    );
+    assert!((out[2] - 0.7).abs() < 1e-6, "through the point: {out:?}");
+    let (input, out) = curved(
+        11,
+        json!({"kind": "points", "points": [[0.2, 0.3], [0.7, 0.6]]}),
+        false,
+    );
+    assert!(input[0] < 0.2 && input[10] > 0.7);
+    assert_eq!((out[0], out[10]), (0.3, 0.6), "flat outside the points");
+    // The value is read between 0 and 1: three times the ramp is read as 1
+    // at the right end.
+    let g = run(&pipeline(
+        (3, 1),
+        json!([{"id": "rampa", "operator": "LinearGradient", "config": {"layer": "distancia"}},
+               {"id": "triplo", "operator": "Combine", "config": {
+                   "inputs": [{"layer": "distancia", "weight": 3}, {"layer": "altura"}],
+                   "op": "sum", "layer": "distancia"}},
+               {"id": "curva", "operator": "Curve", "config": {"input": "distancia", "layer": "altura",
+                "curve": {"kind": "power", "exponent": 2}}}]),
+    ));
+    assert_eq!(heights(&g)[2], 1.0);
+}
+
+/// `pipeline` with a third scalar layer, `lado`.
+fn three_scalars(size: (u32, u32), steps: Value) -> Value {
+    let mut p = pipeline(size, steps);
+    p["layers"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name": "lado", "kind": "scalar"}));
+    p
 }
 
 #[test]
 fn combine_does_each_operation_cell_by_cell() {
-    let steps = |op: &str, mix: Option<f64>, clamp: bool| {
-        json!([noise(5.0),
-            {"id": "centro", "operator": "Gradient", "config": {"layer": "distancia", "shape": "round"}},
-            {"id": "junta", "operator": "Combine", "config": {
-                "a": "altura", "b": "distancia", "op": op, "mix": mix, "layer": "altura", "clamp": clamp}}])
+    let sources = json!([noise(5.0),
+        {"id": "centro", "operator": "RadialGradient", "config": {"layer": "distancia"}},
+        {"id": "faixa", "operator": "LinearGradient", "config": {"layer": "lado"}}]);
+    let steps = |op: &str, weights: [Option<f64>; 3], clamp: bool| {
+        let inputs: Vec<Value> = ["altura", "distancia", "lado"]
+            .iter()
+            .zip(weights)
+            .map(|(l, w)| match w {
+                Some(w) => json!({"layer": l, "weight": w}),
+                None => json!({"layer": l}),
+            })
+            .collect();
+        let mut s = sources.as_array().unwrap().clone();
+        s.push(json!({"id": "junta", "operator": "Combine", "config": {
+            "inputs": inputs, "op": op, "layer": "altura", "clamp": clamp}}));
+        Value::Array(s)
     };
-    let base = run(&pipeline((8, 6), json!([noise(5.0)])));
-    let base_g = run(&pipeline(
-        (8, 6),
-        json!([{"id": "centro", "operator": "Gradient", "config": {"layer": "distancia", "shape": "round"}}]),
-    ));
-    let (a, b) = (heights(&base), scalars(&base_g, "distancia"));
-    type F = fn(f32, f32) -> f32;
-    let cases: [(&str, Option<f64>, F); 6] = [
-        ("lerp", Some(0.25), |x, y| x + (y - x) * 0.25),
-        ("add", None, |x, y| x + y),
-        ("subtract", None, |x, y| x - y),
-        ("multiply", None, |x, y| x * y),
-        ("min", None, f32::min),
-        ("max", None, f32::max),
+    let base = run(&three_scalars((8, 6), sources.clone()));
+    let (a, b, c) = (
+        heights(&base),
+        scalars(&base, "distancia"),
+        scalars(&base, "lado"),
+    );
+    type F = fn(f32, f32, f32) -> f32;
+    let cases: [(&str, [Option<f64>; 3], F); 6] = [
+        ("sum", [None; 3], |x, y, z| x + y + z),
+        ("sum", [Some(0.5), Some(0.3), Some(0.2)], |x, y, z| {
+            0.5 * x + 0.3 * y + 0.2 * z
+        }),
+        ("sum", [None, Some(-1.0), None], |x, y, z| x - y + z),
+        ("multiply", [None; 3], |x, y, z| x * y * z),
+        ("min", [None; 3], |x, y, z| x.min(y).min(z)),
+        ("max", [None; 3], |x, y, z| x.max(y).max(z)),
     ];
-    for (op, mix, f) in cases {
+    for (op, weights, f) in cases {
         for clamp in [false, true] {
-            let out = heights(&run(&pipeline((8, 6), steps(op, mix, clamp))));
+            let out = heights(&run(&three_scalars((8, 6), steps(op, weights, clamp))));
             for i in 0..a.len() {
-                let v = f(a[i], b[i]);
+                let v = f(a[i], b[i], c[i]);
                 let want = if clamp { v.clamp(0.0, 1.0) } else { v };
-                assert_eq!(out[i], want, "{op} clamp {clamp} at {i}");
+                assert!(
+                    (out[i] - want).abs() < 1e-6,
+                    "{op} {weights:?} clamp {clamp} at {i}: {} vs {want}",
+                    out[i]
+                );
             }
         }
+    }
+}
+
+#[test]
+fn weights_summing_to_one_keep_the_mix_between_the_inputs() {
+    // What `lerp` was: two weights summing to 1, no clamp needed.
+    let g = run(&pipeline(
+        (16, 12),
+        json!([noise(5.0),
+            {"id": "centro", "operator": "RadialGradient", "config": {"layer": "distancia"}},
+            {"id": "costa", "operator": "Combine", "config": {
+                "inputs": [{"layer": "altura", "weight": 0.45}, {"layer": "distancia", "weight": 0.55}],
+                "op": "sum", "layer": "distancia"}}]),
+    ));
+    let base = run(&pipeline((16, 12), json!([noise(5.0)])));
+    let (mixed, a) = (scalars(&g, "distancia"), heights(&base));
+    let gradient = scalars(
+        &run(&pipeline(
+            (16, 12),
+            json!([{"id": "centro", "operator": "RadialGradient", "config": {"layer": "distancia"}}]),
+        )),
+        "distancia",
+    );
+    for i in 0..mixed.len() {
+        let (lo, hi) = (a[i].min(gradient[i]), a[i].max(gradient[i]));
+        assert!(mixed[i] >= lo - 1e-6 && mixed[i] <= hi + 1e-6, "at {i}");
     }
 }
 
@@ -246,8 +503,7 @@ fn scalar_in_range_is_half_open() {
     let at_limit = |min: Option<f64>, max: Option<f64>| {
         let g = run(&pipeline(
             (4, 1),
-            json!([{"id": "lado", "operator": "Gradient",
-                    "config": {"layer": "altura", "shape": "horizontal"}},
+            json!([{"id": "lado", "operator": "LinearGradient", "config": {"layer": "altura"}},
                    band("b", "areia", min, max)]),
         ));
         terrain(&g)[1].index() != 0
@@ -366,28 +622,87 @@ fn bad_field_configs_fail_the_build() {
         ),
         (
             "Combine",
-            json!({"a": "altura", "b": "distancia", "op": "lerp", "mix": 2, "layer": "altura"}),
-            "not between 0 and 1",
+            json!({"inputs": [{"layer": "altura"}], "op": "sum", "layer": "altura"}),
+            "at least two layers, got 1",
         ),
         (
             "Combine",
-            json!({"a": "altura", "b": "distancia", "op": "lerp", "layer": "altura"}),
-            "lerp needs mix",
+            json!({"inputs": [{"layer": "altura"}, {"layer": "altura"}], "op": "sum", "layer": "altura"}),
+            "`altura` is listed twice",
         ),
         (
             "Combine",
-            json!({"a": "altura", "b": "distancia", "op": "add", "mix": 0.5, "layer": "altura"}),
-            "only lerp takes mix",
+            json!({"inputs": [{"layer": "altura"}, {"layer": "distancia", "weight": 2}],
+                   "op": "max", "layer": "altura"}),
+            "only sum takes weights",
         ),
         (
             "Combine",
-            json!({"a": "altura", "b": "terreno", "op": "add", "layer": "altura"}),
+            json!({"inputs": [{"layer": "altura"}, {"layer": "distancia"}], "op": "lerp", "layer": "altura"}),
+            "op",
+        ),
+        (
+            "Combine",
+            json!({"inputs": [{"layer": "altura"}, {"layer": "terreno"}], "op": "sum", "layer": "altura"}),
             "expected scalar",
         ),
         (
-            "Gradient",
-            json!({"layer": "altura", "shape": "diamond"}),
+            "RadialGradient",
+            json!({"layer": "altura", "shape": 1.5}),
+            "not between 0 and 1",
+        ),
+        (
+            "RadialGradient",
+            json!({"layer": "altura", "radius_y": 0}),
+            "radius_y",
+        ),
+        (
+            "RadialGradient",
+            json!({"layer": "altura", "shape": "round"}),
             "shape",
+        ),
+        (
+            "LinearGradient",
+            json!({"layer": "altura", "start": 0.6, "end": 0.6}),
+            "not above start",
+        ),
+        (
+            "LinearGradient",
+            json!({"layer": "altura", "end": 2}),
+            "not between 0 and 1",
+        ),
+        (
+            "Curve",
+            json!({"input": "altura", "layer": "altura", "curve": {"kind": "power", "exponent": 0}}),
+            "not above 0",
+        ),
+        (
+            "Curve",
+            json!({"input": "altura", "layer": "altura",
+                   "curve": {"kind": "sigmoid", "exponent": 2, "midpoint": 1}}),
+            "midpoint",
+        ),
+        (
+            "Curve",
+            json!({"input": "altura", "layer": "altura", "curve": {"kind": "terrace", "steps": 0}}),
+            "at least 1",
+        ),
+        (
+            "Curve",
+            json!({"input": "altura", "layer": "altura", "curve": {"kind": "points", "points": [[0, 0]]}}),
+            "at least two points",
+        ),
+        (
+            "Curve",
+            json!({"input": "altura", "layer": "altura",
+                   "curve": {"kind": "points", "points": [[0.5, 0], [0.5, 1]]}}),
+            "does not come after",
+        ),
+        (
+            "Curve",
+            json!({"input": "altura", "layer": "altura",
+                   "curve": {"kind": "power", "exponent": 2, "steps": 3}}),
+            "steps",
         ),
     ] {
         let m = field(op, config.clone());

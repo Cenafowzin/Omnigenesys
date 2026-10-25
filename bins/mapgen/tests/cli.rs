@@ -225,10 +225,12 @@ fn schema_and_operators_go_to_stdout() {
          Check              2d/3d  global\n\
          Combine            2d/3d  local\n\
          ConnectRooms       2d     global\n\
+         Curve              2d/3d  local\n\
          Fill               2d/3d  local\n\
-         Gradient           2d/3d  local\n\
+         LinearGradient     2d/3d  local\n\
          Noise              2d     local\n\
          PlaceRooms         2d     global\n\
+         RadialGradient     2d/3d  local\n\
          RegionSize         2d/3d  global\n\
          RoomGrid           2d     global\n\
          Scatter            2d/3d  local\n"

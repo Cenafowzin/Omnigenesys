@@ -4,7 +4,8 @@
 //!
 //! - `terrain`: `Fill`.
 //! - `scatter`: `Scatter`.
-//! - `field`: scalar layers — `Noise`, `Gradient`, `Combine`.
+//! - `field`: scalar layers — `Noise`, `RadialGradient`,
+//!   `LinearGradient`, `Combine`, `Curve`.
 //! - `shape`: `CellularAutomaton`, `RegionSize`.
 //! - `validate`: `Check`.
 //! - `rooms`: dungeons — rooms, connections, roles (`RoomGrid`,
@@ -21,8 +22,9 @@ mod terrain;
 mod validate;
 
 pub use field::{
-    Combine, CombineConfig, CombineOp, Gradient, GradientConfig, GradientShape, Noise, NoiseConfig,
-    NoiseKind,
+    Combine, CombineConfig, CombineInput, CombineOp, Curve, CurveConfig, CurveKind, Interpolation,
+    LinearGradient, LinearGradientConfig, Noise, NoiseConfig, NoiseKind, RadialGradient,
+    RadialGradientConfig, SmoothOrder,
 };
 pub use rooms::{
     AssignRooms, AssignRoomsConfig, ConnectRooms, ConnectRoomsConfig, CorridorShape, Pick,
@@ -48,10 +50,12 @@ pub(crate) fn register_builtins(r: &mut Registry) {
     add::<Check>(r);
     add::<Combine>(r);
     add::<ConnectRooms>(r);
+    add::<Curve>(r);
     add::<Fill>(r);
-    add::<Gradient>(r);
+    add::<LinearGradient>(r);
     add::<Noise>(r);
     add::<PlaceRooms>(r);
+    add::<RadialGradient>(r);
     add::<RegionSize>(r);
     add::<RoomGrid>(r);
     add::<Scatter>(r);

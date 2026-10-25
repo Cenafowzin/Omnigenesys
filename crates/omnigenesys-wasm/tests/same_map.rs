@@ -84,13 +84,13 @@ fn volume() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn island_from_noise() {
-    assert_eq!(fingerprint(ISLAND_NOISE), 12_091_903_640_494_519_404);
+    assert_eq!(fingerprint(ISLAND_NOISE), 10_504_992_141_109_169_214);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn archipelago() {
-    assert_eq!(fingerprint(ARCHIPELAGO), 3_463_316_865_257_611_296);
+    assert_eq!(fingerprint(ARCHIPELAGO), 9_965_770_022_414_762_509);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
