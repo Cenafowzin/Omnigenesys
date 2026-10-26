@@ -104,3 +104,37 @@ fn isaac_floor() {
 fn classic_dungeon() {
     assert_eq!(fingerprint(DUNGEON), 926_442_635_239_489_141);
 }
+
+/// Expressions over params: the same values to the last bit on both. JSON
+/// writes each f64 in its shortest exact form, so equal text is equal bits.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn expressions() {
+    let text = r#"{
+      "version": 2, "size": {"width": 4, "height": 4}, "layers": ["t"], "tiles": ["a"],
+      "params": {
+        "stage": 3,
+        "rooms": {"type": "integer", "expr": "min(20, 5 + floor(stage * 10 / 3))"},
+        "third": {"type": "number", "expr": "1 / 3 + sqrt(2) * pow(1.1, stage + 7)"},
+        "mix": {"type": "number", "expr": "lerp(0.1, 0.7, third / 10) - div(-7, 2) + mod(-7, 2)"},
+        "half": {"type": "integer", "expr": "round(rooms / 2) + trunc(-2.5) + ceil(0.1)"}
+      },
+      "steps": [{"id": "s", "operator": "Fill", "config": {"layer": "t", "tile": "a"},
+        "conditions": [{"type": "count", "layer": "t", "tile": "a", "distance": 1,
+          "min": {"$param": "half"}, "max": {"$expr": "rooms + floor(mix + third)"}}]}]
+    }"#;
+    let out: serde_json::Value =
+        serde_json::from_str(&api::validate(&Registry::with_builtins(), text, &[])).unwrap();
+    assert_eq!(out["ok"], true, "{out}");
+    let values: Vec<String> = out["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["value"].to_string())
+        .collect();
+    // Checked against Python, the same IEEE operations in the same order.
+    assert_eq!(
+        values,
+        ["3", "15", "4.001439097709713", "5.3400863458625825", "7"]
+    );
+}

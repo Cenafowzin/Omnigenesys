@@ -479,6 +479,7 @@ fn display_reads_like_a_compiler_message() {
                 column: 5,
             }),
         })),
+        expr_span: None,
     };
     assert_eq!(d.to_string(), "12:9: step 'walls': boom; from here at 4:5");
     let bare = Diagnostic::new("", "the file is empty");
@@ -533,5 +534,177 @@ fn an_override_of_an_unknown_param_lists_the_declared_ones() {
     assert_eq!(
         e[0].message,
         "override x=1: no param 'x' (the file declares none)"
+    );
+}
+
+/// `base()` with `params`, and the first step's config `extra` set to `extra`.
+fn with_params(params: Value, extra: Value) -> String {
+    with(|v| {
+        v["params"] = params;
+        v["steps"][0]["config"]["extra"] = extra;
+    })
+}
+
+fn extra_of(text: &str, overrides: &[(&str, &str)]) -> Result<Value, Vec<Diagnostic>> {
+    let o: Vec<(String, String)> = overrides
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+    PipelineSpec::parse_with(text, &o).map(|p| p.spec.steps[0].config["extra"].clone())
+}
+
+#[test]
+fn computed_params_follow_their_inputs() {
+    let text = with_params(
+        json!({
+            "stage": {"type": "integer", "default": 1, "min": 1, "max": 9},
+            "rooms": {"type": "integer", "expr": "min(20, 5 + floor(stage * 10 / 3))"}
+        }),
+        json!({"$param": "rooms"}),
+    );
+    assert_eq!(extra_of(&text, &[]).unwrap(), json!(8));
+    assert_eq!(extra_of(&text, &[("stage", "4")]).unwrap(), json!(18));
+    assert_eq!(extra_of(&text, &[("stage", "9")]).unwrap(), json!(20));
+    // What the output records: every param with the value used.
+    let p = PipelineSpec::parse_with(&text, &[("stage".into(), "2".into())]).unwrap();
+    assert_eq!(
+        p.spec.param_values(),
+        [
+            ("stage".to_string(), ParamValue::Integer(2)),
+            ("rooms".to_string(), ParamValue::Integer(11)),
+        ]
+    );
+    assert_eq!(p.spec.params["rooms"].default, ParamValue::Integer(11));
+    // `stage` is used through `rooms`: no "never used" warning.
+    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+}
+
+#[test]
+fn computed_params_read_each_other_in_any_order() {
+    let text = with_params(
+        json!({
+            "double": {"type": "integer", "expr": "base * 2"},
+            "base": {"type": "integer", "expr": "size + 1"},
+            "size": 3,
+            "ratio": {"type": "number", "expr": "double"}
+        }),
+        json!({"$param": "ratio"}),
+    );
+    // A number param takes an integer expression.
+    assert_eq!(extra_of(&text, &[]).unwrap(), json!(8.0));
+}
+
+#[test]
+fn a_circle_of_computed_params_is_named() {
+    let text = with_params(
+        json!({
+            "a": {"type": "integer", "expr": "b + 1"},
+            "b": {"type": "integer", "expr": "a + 1"},
+            "c": {"type": "integer", "expr": "a"}
+        }),
+        json!({"$param": "c"}),
+    );
+    let e = extra_of(&text, &[]).unwrap_err();
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0].pointer, "/params/a/expr");
+    assert_eq!(
+        e[0].message,
+        "params compute from each other in a circle: a → b → a"
+    );
+}
+
+#[test]
+fn a_computed_param_is_checked_like_a_default() {
+    let one = |params: Value| {
+        let e = extra_of(&with_params(params, json!(0)), &[]).unwrap_err();
+        assert_eq!(e.len(), 1, "{e:?}");
+        (e[0].pointer.clone(), e[0].message.clone(), e[0].expr_span)
+    };
+    let (at, m, _) = one(json!({"n": {"type": "integer", "expr": "7 / 2"}}));
+    assert_eq!(at, "/params/n/expr");
+    assert!(m.contains("wrap it in floor(), round() or ceil()"), "{m}");
+    let (_, m, _) = one(json!({"n": {"type": "integer", "expr": "20", "max": 10}}));
+    assert_eq!(m, "param 'n' computed 20: 20 is outside min..=max");
+    let (_, m, span) = one(json!({"stage": 1, "n": {"type": "integer", "expr": "stagee + 1"}}));
+    assert_eq!(
+        m,
+        "param 'n': no param named 'stagee' (did you mean stage?)"
+    );
+    assert_eq!(span, Some((0, 6)), "where in the expression");
+    let (_, m, span) = one(json!({"n": {"type": "integer", "expr": "2 ^ 3"}}));
+    assert!(m.contains("pow(base, exponent)"), "{m}");
+    assert_eq!(span, Some((2, 3)));
+    let (at, m, _) = one(json!({"n": {"type": "integer", "expr": "1", "default": 1}}));
+    assert_eq!(at, "/params/n/default");
+    assert!(m.contains("has no default"), "{m}");
+    let (at, m, _) = one(json!({"n": {"type": "integer"}}));
+    assert_eq!(at, "/params/n/default");
+    assert!(m.contains("needs a `default` (or an `expr`)"), "{m}");
+    let (at, m, _) = one(json!({"max": 3}));
+    assert_eq!(at, "/params/max");
+    assert!(m.contains("a word of the expression language"), "{m}");
+}
+
+#[test]
+fn a_game_sets_the_inputs_not_what_they_compute() {
+    let text = with_params(
+        json!({
+            "stage": 1,
+            "rooms": {"type": "integer", "expr": "stage + 4"}
+        }),
+        json!({"$param": "rooms"}),
+    );
+    let e = extra_of(&text, &[("rooms", "12")]).unwrap_err();
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(
+        e[0].message,
+        "override rooms=12: 'rooms' is computed from its expression; set stage instead"
+    );
+}
+
+#[test]
+fn an_expression_can_stand_for_any_value_in_a_step() {
+    let text = with_params(
+        json!({"stage": 2, "rooms": {"type": "integer", "expr": "stage + 6"}}),
+        json!({"min": {"$expr": "rooms"}, "max": {"$expr": "rooms + 1"},
+               "half": {"$expr": "rooms / 16"}, "many": {"$expr": "rooms > 7"}}),
+    );
+    assert_eq!(
+        extra_of(&text, &[]).unwrap(),
+        json!({"min": 8, "max": 9, "half": 0.5, "many": true})
+    );
+    // A mistake points into the expression, in the step where it is.
+    let text = with_params(json!({"stage": 2}), json!({"$expr": "stage * (1 +"}));
+    let e = PipelineSpec::parse(&text).unwrap_err();
+    assert_eq!(e.len(), 1, "{e:?}");
+    assert_eq!(e[0].pointer, "/steps/0/config/extra/$expr");
+    assert_eq!(e[0].message, "the expression ends too soon");
+    assert_eq!(e[0].expr_span, Some((12, 12)));
+    assert!(e[0].span.is_some(), "located in the file");
+    // Only exactly one key, only inside steps.
+    let text = with_params(json!({}), json!({"$expr": "1", "x": 2}));
+    assert!(errors(&text)[0].1.contains(r#"exactly {"$expr": "text"}"#));
+    let text = with(|v| v["description"] = json!({"$expr": "1"}));
+    assert!(
+        errors(&text)[0]
+            .1
+            .contains("can only be used inside a step")
+    );
+}
+
+#[test]
+fn an_error_later_says_which_expression_gave_the_value() {
+    // Scatter's `chance` must be between 0 and 1; the expression gives 2.
+    let text = with(|v| {
+        v["params"] = json!({"k": 4});
+        v["steps"][0] = json!({"id": "noise", "operator": "Scatter",
+            "config": {"layer": "terrain", "tile": "wall", "chance": {"$expr": "k / 2"}}});
+    });
+    let spec = parse(&text).spec;
+    let e = spec.build(&Registry::with_builtins()).err().unwrap();
+    let note = e[0].note.as_ref().expect("a note");
+    assert_eq!(
+        note.message,
+        "the value 2.0 comes from the expression `k / 2`"
     );
 }

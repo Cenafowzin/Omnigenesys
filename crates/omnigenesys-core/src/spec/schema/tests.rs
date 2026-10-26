@@ -64,6 +64,26 @@ fn params_are_accepted_where_the_parser_takes_them() {
 }
 
 #[test]
+fn expressions_are_accepted_where_the_parser_takes_them() {
+    assert!(accepts(
+        |v| v["steps"][3]["config"]["chance"] = json!({"$expr": "wall_chance / 2"})
+    ));
+    assert!(!accepts(
+        |v| v["steps"][3]["config"]["chance"] = json!({"$expr": "1", "$param": "x"})
+    ));
+    assert!(accepts(|v| {
+        v["params"]["rooms"] = json!({"type": "integer", "expr": "min(20, 8)"});
+    }));
+    // A value of its own or an expression, not both and not neither.
+    assert!(!accepts(|v| {
+        v["params"]["rooms"] = json!({"type": "integer", "expr": "8", "default": 8});
+    }));
+    assert!(!accepts(
+        |v| v["params"]["rooms"] = json!({"type": "integer"})
+    ));
+}
+
+#[test]
 fn the_root_rules_are_in_the_schema() {
     assert!(!accepts(|v| v["version"] = json!(3)));
     assert!(!accepts(|v| v["sise"] = json!(1)));

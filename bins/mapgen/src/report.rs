@@ -98,6 +98,7 @@ mod tests {
                 column,
             }),
             note: None,
+            expr_span: None,
         }
     }
 

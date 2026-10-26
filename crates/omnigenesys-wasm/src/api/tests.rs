@@ -304,3 +304,57 @@ fn reading_a_layer_nothing_wrote_yet_is_a_warning() {
     let v = parse(&validate(&registry(), ISLAND, &[]));
     assert_eq!(v["warnings"], json!([]));
 }
+
+#[test]
+fn validate_gives_each_param_with_its_value() {
+    let text = json!({
+        "version": 2, "size": {"width": 4, "height": 4}, "layers": ["t"], "tiles": ["a"],
+        "params": {
+            "stage": {"type": "integer", "default": 2, "min": 1, "max": 9, "description": "floor"},
+            "rooms": {"type": "integer", "expr": "stage + 6"}
+        },
+        "steps": [{"id": "s", "operator": "Fill", "config": {"layer": "t", "tile": "a"},
+            "conditions": [{"type": "count", "layer": "t", "tile": "a", "distance": 1,
+                            "min": {"$param": "rooms"}, "max": {"$expr": "rooms * 2"}}]}]
+    })
+    .to_string();
+    let v = parse(&validate(
+        &registry(),
+        &text,
+        &[("stage".into(), "3".into())],
+    ));
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(
+        v["params"],
+        json!([
+            {"name": "stage", "type": "integer", "value": 3, "description": "floor",
+             "min": 1.0, "max": 9.0},
+            {"name": "rooms", "type": "integer", "value": 9, "expr": "stage + 6"}
+        ])
+    );
+    assert_eq!(
+        v["exprs"],
+        json!([{"pointer": "/steps/0/conditions/0/max", "value": 18}])
+    );
+}
+
+#[test]
+fn a_mistake_in_an_expression_says_where_in_it() {
+    let text = json!({
+        "version": 2, "size": {"width": 4, "height": 4}, "layers": ["t"], "tiles": ["a"],
+        "params": {"stage": 1, "rooms": {"type": "integer", "expr": "stage ^ 2"}},
+        "steps": [{"id": "s", "operator": "Fill", "config": {"layer": "t", "tile": "a"}}]
+    })
+    .to_string();
+    let v = parse(&validate(&registry(), &text, &[]));
+    assert_eq!(v["ok"], false);
+    let e = &v["errors"][0];
+    assert_eq!(e["pointer"], "/params/rooms/expr");
+    assert_eq!(e["expr_span"], json!({"start": 6, "end": 7}));
+    assert!(
+        e["message"]
+            .as_str()
+            .unwrap()
+            .contains("pow(base, exponent)")
+    );
+}

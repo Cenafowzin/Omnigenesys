@@ -8,6 +8,7 @@ pub mod bounds;
 pub mod condition;
 pub mod coords;
 pub mod export;
+pub mod expr;
 pub mod grid;
 pub mod layer;
 pub mod mask;

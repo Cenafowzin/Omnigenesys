@@ -55,24 +55,76 @@ pub fn operators(registry: &Registry) -> String {
 }
 
 /// Checks a pipeline without running it. Always answers (problems are
-/// data, not failures): `{"ok", "errors", "warnings", "steps"}`, `steps`
-/// only when it builds, with what each step reads and writes, for the
-/// graph view.
+/// data, not failures): `{"ok", "errors", "warnings", "params", "exprs",
+/// "steps"}`. `params` and `exprs` once the file reads: the value each
+/// param has (computed ones too), and what each `$expr` of the steps gave;
+/// `steps` only when it builds, with what each step reads and writes, for
+/// the graph view.
 pub fn validate(registry: &Registry, text: &str, params: &[(String, String)]) -> String {
     let parsed = match PipelineSpec::parse_with(text, params) {
         Ok(p) => p,
-        Err(errors) => return report(text, &errors, &[], None),
+        Err(errors) => return report(text, &errors, &[], None, None),
     };
+    let values = param_values(&parsed.spec);
     match parsed.spec.build(registry) {
-        Ok(built) => report(text, &[], &parsed.warnings, Some((&parsed.spec, &built))),
-        Err(errors) => report(text, &errors, &parsed.warnings, None),
+        Ok(built) => report(
+            text,
+            &[],
+            &parsed.warnings,
+            Some(values),
+            Some((&parsed.spec, &built)),
+        ),
+        Err(errors) => report(text, &errors, &parsed.warnings, Some(values), None),
     }
+}
+
+/// `{"list": [{name, type, value, expr?, ...}], "exprs": [{pointer,
+/// value}]}`: each param as declared with the value it has, in the order of
+/// the file, and each `$expr` of the steps with the value it gave.
+fn param_values(spec: &PipelineSpec) -> Value {
+    let list: Vec<Value> = spec
+        .param_values()
+        .iter()
+        .map(|(name, value)| {
+            let mut p = json!({
+                "name": name,
+                "type": value.kind().to_string(),
+                "value": json_of(value),
+            });
+            if let Some(d) = spec.params.get(name) {
+                for (key, field) in [
+                    ("expr", d.expr.clone().map(Value::from)),
+                    ("description", d.description.clone().map(Value::from)),
+                    ("min", d.min.map(Value::from)),
+                    ("max", d.max.map(Value::from)),
+                    ("step", d.step.map(Value::from)),
+                    ("enum", d.choices.clone().map(Value::from)),
+                ] {
+                    if let Some(f) = field {
+                        p[key] = f;
+                    }
+                }
+            }
+            p
+        })
+        .collect();
+    let exprs: Vec<Value> = spec
+        .expressions()
+        .map(|(pointer, _, value)| json!({"pointer": pointer, "value": json_of(value)}))
+        .collect();
+    json!({"list": list, "exprs": exprs})
+}
+
+/// As the file writes it: `0.5`, `3`, `true`, `"forest"`.
+fn json_of(value: &spec::ParamValue) -> Value {
+    serde_json::from_str(&value.to_string()).unwrap_or(Value::Null)
 }
 
 fn report(
     text: &str,
     errors: &[Diagnostic],
     warnings: &[Diagnostic],
+    params: Option<Value>,
     built: Option<(&PipelineSpec, &Built)>,
 ) -> String {
     let list = |ds: &[Diagnostic]| ds.iter().map(|d| diagnostic(text, d)).collect::<Vec<_>>();
@@ -81,6 +133,10 @@ fn report(
         "errors": list(errors),
         "warnings": list(warnings),
     });
+    if let Some(mut params) = params {
+        out["params"] = params["list"].take();
+        out["exprs"] = params["exprs"].take();
+    }
     if let Some((spec, built)) = built {
         out["steps"] = steps(spec, built);
         if let Value::Array(list) = &mut out["warnings"] {
@@ -132,6 +188,9 @@ fn diagnostic(text: &str, d: &Diagnostic) -> Value {
         "pointer": d.pointer,
         "span": span(text, d.span),
         "note": note,
+        // Inside the expression's own text, in UTF-8 bytes (the app has
+        // the text and converts; for ASCII, bytes are UTF-16 units too).
+        "expr_span": d.expr_span.map(|(start, end)| json!({"start": start, "end": end})),
     })
 }
 

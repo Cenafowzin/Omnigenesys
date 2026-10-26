@@ -60,6 +60,8 @@ fn the_full_form_keeps_everything() {
             step: Some(0.05),
             choices: None,
             description: Some("how many trees".to_string()),
+            expr: None,
+            compiled: None,
         }
     );
     let p = declare(
@@ -198,7 +200,7 @@ fn references_in_config_and_conditions_are_replaced() {
     assert_eq!(doc["steps"][0]["conditions"][0]["distance"], json!(2));
     let sites: Vec<_> = sites
         .iter()
-        .map(|s| (s.pointer.as_str(), s.param.as_str()))
+        .map(|s| (s.pointer.as_str(), s.params[0].as_str()))
         .collect();
     assert_eq!(
         sites,

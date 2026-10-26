@@ -97,6 +97,9 @@ pub struct Diagnostic {
     /// A second place that explains the first. Boxed: it is rare, and a
     /// smaller `Diagnostic` is cheaper to return in every `Result`.
     pub note: Option<Box<Note>>,
+    /// For a mistake inside an expression (`"expr"`, `{"$expr": ...}`):
+    /// where in its text, as byte offsets `start..end`.
+    pub expr_span: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +127,7 @@ impl Diagnostic {
             pointer: pointer.into(),
             span: None,
             note: None,
+            expr_span: None,
         }
     }
 
@@ -157,6 +161,9 @@ impl fmt::Display for Diagnostic {
             write!(f, "step '{id}': ")?;
         }
         f.write_str(&self.message)?;
+        if let Some((start, _)) = self.expr_span {
+            write!(f, " (character {} of the expression)", start + 1)?;
+        }
         if let Some(note) = &self.note {
             write!(f, "; {}", note.message)?;
             if let Some(s) = note.span {
@@ -186,10 +193,20 @@ impl Origin {
             if d.note.is_none()
                 && let Some(site) = self.sites.iter().find(|s| within(&d.pointer, &s.pointer))
             {
-                d.set_note(
-                    format!("the value comes from param '{}'", site.param),
-                    params::param_pointer(&site.param),
-                );
+                match (&site.expr, site.params.first()) {
+                    (Some(text), _) => d.set_note(
+                        format!(
+                            "the value {} comes from the expression `{text}`",
+                            site.value
+                        ),
+                        site.pointer.clone(),
+                    ),
+                    (None, Some(param)) => d.set_note(
+                        format!("the value comes from param '{param}'"),
+                        params::param_pointer(param),
+                    ),
+                    (None, None) => {}
+                }
             }
             d.locate(&self.spans);
         }
@@ -272,27 +289,25 @@ impl PipelineSpec {
             spans,
             ..Origin::default()
         };
-        if let Err(d) = check_version(&root) {
+        if let Some(d) = check_version(&root) {
             return Err(origin.finish(vec![d]));
         }
 
         let mut errors = Vec::new();
         let mut declared = params::declarations(root.get("params"), &mut errors);
         params::apply_overrides(&mut declared, overrides, &mut errors);
+        params::compute(&mut declared, &mut errors);
         origin.sites = params::substitute(&mut root, &declared, &mut errors);
         let values = declared
             .params
-            .iter()
-            .map(|(name, p)| {
-                let value = declared.overrides.get(name).unwrap_or(&p.default);
-                (name.clone(), value.clone())
-            })
+            .keys()
+            .filter_map(|name| Some((name.clone(), declared.value(name)?.clone())))
             .collect();
         let params = declared.params;
         let raw: RawRoot = match deserialize(root, "") {
             Ok(raw) => raw,
             Err(d) => {
-                errors.push(d);
+                errors.push(*d);
                 return Err(origin.finish(errors));
             }
         };
@@ -305,8 +320,10 @@ impl PipelineSpec {
             // Read before deserializing, so even a broken step names itself.
             let id = value.get("id").and_then(Value::as_str).map(str::to_string);
             let step = deserialize::<RawStep>(value, &at).and_then(|s| {
-                check_step_id(&s.id, &at, &origin.steps)?;
-                Ok(s)
+                match check_step_id(&s.id, &at, &origin.steps) {
+                    Some(d) => Err(Box::new(d)),
+                    None => Ok(s),
+                }
             });
             match step {
                 Ok(s) => {
@@ -321,7 +338,7 @@ impl PipelineSpec {
                 }
                 Err(mut d) => {
                     d.step_id = id;
-                    errors.push(d);
+                    errors.push(*d);
                 }
             }
         }
@@ -329,9 +346,10 @@ impl PipelineSpec {
             return Err(origin.finish(errors));
         }
 
+        let used = params::used(&params, &origin.sites);
         let warnings = params
             .keys()
-            .filter(|name| !origin.sites.iter().any(|s| &s.param == *name))
+            .filter(|name| !used.contains(*name))
             .map(|name| {
                 Diagnostic::new(
                     params::param_pointer(name),
@@ -353,6 +371,15 @@ impl PipelineSpec {
             origin,
         };
         Ok(Parsed { spec, warnings })
+    }
+
+    /// Every `{"$expr": ...}` in the steps, by the pointer it stood at,
+    /// with its text and the value it gave: for an editor to show next to it.
+    pub fn expressions(&self) -> impl Iterator<Item = (&str, &str, &ParamValue)> {
+        self.origin
+            .sites
+            .iter()
+            .filter_map(|s| Some((s.pointer.as_str(), s.expr.as_deref()?, &s.value)))
     }
 
     /// Every declared param with the value the steps got: the override if
@@ -502,39 +529,40 @@ fn find_string(value: &Value, needle: &str, pointer: &mut String) -> bool {
 }
 
 /// Deserializes `value`, placing an error at `at` + where serde stopped.
-fn deserialize<T: DeserializeOwned>(value: Value, at: &str) -> Result<T, Diagnostic> {
+/// Boxed: the error is the rare path, and `Diagnostic` is large.
+fn deserialize<T: DeserializeOwned>(value: Value, at: &str) -> Result<T, Box<Diagnostic>> {
     serde_path_to_error::deserialize(value).map_err(|e| {
         let pointer = format!("{at}{}", pointer(e.path()));
-        Diagnostic::new(pointer, e.into_inner().to_string())
+        Box::new(Diagnostic::new(pointer, e.into_inner().to_string()))
     })
 }
 
 /// Checked before anything else: a newer file must say "update", not list
-/// the fields this version does not know.
-fn check_version(root: &Value) -> Result<(), Diagnostic> {
+/// the fields this version does not know. The problem, if there is one.
+fn check_version(root: &Value) -> Option<Diagnostic> {
     let Some(root) = root.as_object() else {
-        return Err(Diagnostic::new("", "a pipeline is a JSON object"));
+        return Some(Diagnostic::new("", "a pipeline is a JSON object"));
     };
     let Some(version) = root.get("version") else {
-        return Err(Diagnostic::new(
+        return Some(Diagnostic::new(
             "",
             format!("missing `version` (this is format version {FORMAT_VERSION})"),
         ));
     };
     match version.as_u64() {
-        Some(FORMAT_VERSION) => Ok(()),
-        Some(v) if v > FORMAT_VERSION => Err(Diagnostic::new(
+        Some(FORMAT_VERSION) => None,
+        Some(v) if v > FORMAT_VERSION => Some(Diagnostic::new(
             "/version",
             format!(
                 "format version {v} is newer than this omnigenesys reads \
                  ({FORMAT_VERSION}); update omnigenesys"
             ),
         )),
-        Some(v) => Err(Diagnostic::new(
+        Some(v) => Some(Diagnostic::new(
             "/version",
             format!("format version {v} is not supported; this omnigenesys reads {FORMAT_VERSION}"),
         )),
-        None => Err(Diagnostic::new("/version", "`version` must be an integer")),
+        None => Some(Diagnostic::new("/version", "`version` must be an integer")),
     }
 }
 
@@ -600,14 +628,14 @@ fn check_names<'a>(
 
 /// `^[a-z][a-z0-9_-]{0,63}$`, unique. The id seeds the step's randomness
 /// (PLANNING §2.1, item 7): renaming a step changes its map.
-fn check_step_id(id: &str, at: &str, seen: &HashMap<String, usize>) -> Result<(), Diagnostic> {
+fn check_step_id(id: &str, at: &str, seen: &HashMap<String, usize>) -> Option<Diagnostic> {
     let b = id.as_bytes();
     let valid = (1..=64).contains(&b.len())
         && b[0].is_ascii_lowercase()
         && b.iter()
             .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-');
     if !valid {
-        return Err(Diagnostic::new(
+        return Some(Diagnostic::new(
             format!("{at}/id"),
             format!(
                 "step id '{id}' must start with a-z and use only a-z, 0-9, '_' and '-', \
@@ -621,9 +649,9 @@ fn check_step_id(id: &str, at: &str, seen: &HashMap<String, usize>) -> Result<()
             format!("step id '{id}' is already used by another step"),
         );
         d.set_note("first used here", format!("/steps/{first}/id"));
-        return Err(d);
+        return Some(d);
     }
-    Ok(())
+    None
 }
 
 /// A number up to [`MAX_NUMBER_SEED`], or a decimal string with any u64.

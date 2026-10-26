@@ -118,9 +118,7 @@ impl Operator for Combine {
             .collect::<Result<Vec<_>, OpError>>()?;
         let out = grid.scalars_mut(self.out)?;
         for c in mask.iter_ones() {
-            let values = inputs
-                .iter()
-                .map(|(l, w)| (*l.get(c).unwrap_or(&0.0), *w));
+            let values = inputs.iter().map(|(l, w)| (*l.get(c).unwrap_or(&0.0), *w));
             // There are always two or more inputs, so the infinities never
             // come out.
             let v = match self.op {

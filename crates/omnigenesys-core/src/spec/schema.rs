@@ -128,12 +128,23 @@ fn step(registry: &Registry, condition: Value, dispatch: Vec<Value>) -> Value {
     })
 }
 
+/// `{"$param": "name"}`, or an expression over params, `{"$expr": "text"}`.
 fn param_ref() -> Value {
     json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["$param"],
-        "properties": {"$param": {"type": "string"}}
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["$param"],
+                "properties": {"$param": {"type": "string"}}
+            },
+            {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["$expr"],
+                "properties": {"$expr": {"type": "string", "maxLength": crate::expr::MAX_LEN}}
+            }
+        ]
     })
 }
 
@@ -144,10 +155,13 @@ fn param() -> Value {
             {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["type", "default"],
+                "required": ["type"],
+                // A value of its own, or one computed from other params.
+                "oneOf": [{"required": ["default"]}, {"required": ["expr"]}],
                 "properties": {
                     "type": {"enum": ["number", "integer", "boolean", "string"]},
                     "default": {"type": ["number", "boolean", "string"]},
+                    "expr": {"type": "string", "maxLength": crate::expr::MAX_LEN},
                     "min": {"type": "number"},
                     "max": {"type": "number"},
                     "step": {"type": "number", "exclusiveMinimum": 0},

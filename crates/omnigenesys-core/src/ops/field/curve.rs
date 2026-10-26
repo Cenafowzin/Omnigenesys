@@ -106,10 +106,20 @@ enum Shape {
     Linear,
     Smooth(SmoothOrder),
     Power(f64),
-    Sigmoid { a: f64, k: f64 },
-    Terrace { steps: f64, smoothness: f64 },
+    Sigmoid {
+        a: f64,
+        k: f64,
+    },
+    Terrace {
+        steps: f64,
+        smoothness: f64,
+    },
     /// The points and, for a monotone curve, the slope at each.
-    Points { xs: Vec<f64>, ys: Vec<f64>, slopes: Option<Vec<f64>> },
+    Points {
+        xs: Vec<f64>,
+        ys: Vec<f64>,
+        slopes: Option<Vec<f64>>,
+    },
 }
 
 impl Shape {
@@ -119,7 +129,10 @@ impl Shape {
             if v.is_finite() && v > 0.0 {
                 Ok(v)
             } else {
-                Err(invalid(format!("curve/{field}"), format!("{v} is not above 0")))
+                Err(invalid(
+                    format!("curve/{field}"),
+                    format!("{v} is not above 0"),
+                ))
             }
         };
         Ok(match kind {
