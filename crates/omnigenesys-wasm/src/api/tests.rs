@@ -358,3 +358,35 @@ fn a_mistake_in_an_expression_says_where_in_it() {
             .contains("pow(base, exponent)")
     );
 }
+
+#[test]
+fn objects_come_with_their_lattice_props_and_links() {
+    let text = include_str!("../../../omnigenesys-core/tests/pipelines/isaac.json");
+    let map = generate(&Registry::with_builtins(), text, &[], None, None).unwrap();
+    let layers: Value = serde_json::from_str(&map.objects()).unwrap();
+    let by_name = |n: &str| {
+        layers
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["name"] == n)
+            .unwrap()
+            .clone()
+    };
+    // Only object layers.
+    assert_eq!(layers.as_array().unwrap().len(), 2);
+    let rooms = by_name("salas");
+    assert_eq!(
+        rooms["lattice"],
+        json!({"columns": 9, "rows": 8, "cell": [15, 9], "origin": [0, 0]})
+    );
+    let first = &rooms["objects"][0];
+    assert_eq!(first["kind"], "sala");
+    assert_eq!(first["props"]["role"], "inicio");
+    assert_eq!(first["props"]["distancia"], 0);
+    assert_eq!(first["bbox"], json!([60, 36, 15, 9]));
+    let doors = by_name("conexoes");
+    assert_eq!(doors["lattice"], Value::Null);
+    let from = &doors["objects"][0]["props"]["from"];
+    assert!(from["object"].is_u64(), "{from}");
+}

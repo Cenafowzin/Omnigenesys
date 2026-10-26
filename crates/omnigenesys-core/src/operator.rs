@@ -15,6 +15,7 @@ use crate::{
     access::{Access, Reach, ReadHandle, WriteHandle},
     bounds::Bounds,
     condition::{CompiledCondition, Condition, ConditionError, PreparedCondition},
+    filter::{CompiledFilter, FilterError, ObjectFilter},
     grid::{Grid, GridError, LayerId, Split},
     layer::{Layer, LayerKind, OutOfBounds},
     object::ObjectLayer,
@@ -202,6 +203,8 @@ pub enum BuildError {
     Tile(#[from] TileError),
     #[error(transparent)]
     Condition(#[from] ConditionError),
+    #[error("invalid '{field}': {error}")]
+    Filter { field: String, error: FilterError },
 }
 
 /// " at '/radius'", or nothing for the config itself.
@@ -360,6 +363,35 @@ impl<'a> BuildContext<'a> {
 
     pub fn tile(&self, name: &str) -> Result<TileId, BuildError> {
         Ok(self.tiles.id(name)?)
+    }
+
+    /// Compiles the object filters at `field` of the config, for objects
+    /// of `layer` (a layer the step already declared). The layers they
+    /// look into (`refers_to`) join the step's reads.
+    pub fn filter(
+        &mut self,
+        field: &str,
+        filters: &[ObjectFilter],
+        layer: LayerId,
+    ) -> Result<CompiledFilter, BuildError> {
+        let compiled =
+            CompiledFilter::compile(filters, self.grid, layer).map_err(|error| match error {
+                // Kept as it is, so a missing layer is reported once per file.
+                FilterError::Grid(e) => BuildError::Grid(e),
+                error => BuildError::Filter {
+                    field: field.to_string(),
+                    error,
+                },
+            })?;
+        for l in compiled.layers() {
+            self.access.add_read(l, Reach::ZERO);
+        }
+        Ok(compiled)
+    }
+
+    /// The lattice of the object layer `layer`, if it has one.
+    pub fn lattice(&self, layer: LayerId) -> Option<crate::object::Lattice> {
+        self.grid.objects(layer).ok()?.lattice().copied()
     }
 
     /// Compiles a condition from the operator's own config; its reads join

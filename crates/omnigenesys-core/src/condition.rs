@@ -6,6 +6,7 @@ use crate::{
     access::Reach,
     bounds::Bounds,
     coords::Coord,
+    filter::{CompiledFilter, FilterError, ObjectFilter, Scene, Subject},
     grid::{Grid, GridError, LayerId},
     layer::{Layer, LayerKind},
     mask::{CellMask, MaskWriter},
@@ -72,6 +73,11 @@ enum Compiled {
     EdgeDistance {
         min: u32,
         max: u32,
+    },
+    InObject {
+        layer: LayerId,
+        part: Part,
+        filter: CompiledFilter,
     },
     Any(Vec<Compiled>),
     All(Vec<Compiled>),
@@ -140,6 +146,17 @@ pub enum Condition {
         #[serde(default)]
         max: Option<u32>,
     },
+    /// The cell is inside an object of the object layer `layer` that
+    /// passes `where`: anywhere in its box, only on its `wall` (the box's
+    /// outer ring, one cell thick, in x and y) or only `inside` it. A
+    /// room's floor, its walls, the door cells of a connection.
+    InObject {
+        layer: String,
+        #[serde(default)]
+        part: Part,
+        #[serde(rename = "where", default)]
+        filter: Vec<ObjectFilter>,
+    },
     Any {
         conditions: Vec<Condition>,
     },
@@ -149,6 +166,16 @@ pub enum Condition {
     Not {
         condition: Box<Condition>,
     },
+}
+
+/// Which cells of an object's box: all, the outer ring, or the rest.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Part {
+    #[default]
+    Any,
+    Wall,
+    Inside,
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -171,6 +198,8 @@ pub enum ConditionError {
     EmptyEdgeRange { min: u32, max: u32 },
     #[error("layer has {cells} cells, more than a distance condition can count")]
     TooManyCellsToCount { cells: usize },
+    #[error("in_object: {0}")]
+    Filter(#[from] FilterError),
 }
 
 /// Entry `(x, y, z)` counts the matches in the local box `[0, x) × [0, y) × [0, z]`.
@@ -368,6 +397,10 @@ fn reads(c: &Compiled, out: &mut Vec<(LayerId, Reach)>) {
         }
         // Reads no layer: only where the cell is in the map.
         Compiled::EdgeDistance { .. } => {}
+        Compiled::InObject { layer, filter, .. } => {
+            out.push((*layer, Reach::ZERO));
+            out.extend(filter.layers().into_iter().map(|l| (l, Reach::ZERO)));
+        }
         Compiled::NearType { layer, radius, .. }
         | Compiled::NotNearType { layer, radius, .. }
         | Compiled::AreaIs { layer, radius, .. }
@@ -473,6 +506,11 @@ fn prepare(c: &Compiled, grid: &Grid) -> Result<Prepared, ConditionError> {
             *min,
             *max,
         )),
+        Compiled::InObject {
+            layer,
+            part,
+            filter,
+        } => Prepared::TileIs(in_object(grid, *layer, *part, filter)?),
         Compiled::Any(cs) => Prepared::Any(prepare_all(cs, grid)?),
         Compiled::All(cs) => Prepared::All(prepare_all(cs, grid)?),
         Compiled::Not(c) => Prepared::Not(Box::new(prepare(c, grid)?)),
@@ -508,6 +546,53 @@ fn prepare(c: &Compiled, grid: &Grid) -> Result<Prepared, ConditionError> {
             max,
         } => window(grid, *layer, tiles, *radius, (*min).into(), (*max).into())?,
     })
+}
+
+/// The cells of `grid` in the `part` of an object of `layer` that passes
+/// `filter`.
+fn in_object(
+    grid: &Grid,
+    layer: LayerId,
+    part: Part,
+    filter: &CompiledFilter,
+) -> Result<CellMask, ConditionError> {
+    let mut ids = vec![layer];
+    ids.extend(filter.layers().into_iter().filter(|l| *l != layer));
+    let layers = ids
+        .iter()
+        .map(|&id| Ok((id, grid.objects(id)?)))
+        .collect::<Result<Vec<_>, GridError>>()?;
+    let scene = Scene::new(grid.map(), layers);
+    let region = grid.bounds();
+    let mut hit = vec![false; region.size.len()];
+    for (i, o) in scene.objects(layer).iter().enumerate() {
+        if !filter.test(&scene, layer, Subject::Object(i)) {
+            continue;
+        }
+        let b = o.bbox;
+        let (x1, y1) = (
+            i64::from(b.origin.x) + i64::from(b.size.width) - 1,
+            i64::from(b.origin.y) + i64::from(b.size.height) - 1,
+        );
+        for c in b.iter() {
+            let Some(k) = region.index_of(c) else {
+                continue;
+            };
+            let (x, y) = (i64::from(c.x), i64::from(c.y));
+            let ring =
+                x == i64::from(b.origin.x) || x == x1 || y == i64::from(b.origin.y) || y == y1;
+            hit[k] |= match part {
+                Part::Any => true,
+                Part::Wall => ring,
+                Part::Inside => !ring,
+            };
+        }
+    }
+    let mut w = MaskWriter::new(region);
+    for h in hit {
+        w.push(h);
+    }
+    Ok(w.finish())
 }
 
 fn window(
@@ -612,6 +697,21 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
                 max: max.unwrap_or(u32::MAX),
             },
         },
+        Condition::InObject {
+            layer,
+            part,
+            filter,
+        } => {
+            let id = kind_layer(grid, layer, LayerKind::Objects)?;
+            Compiled::InObject {
+                layer: id,
+                part: *part,
+                filter: CompiledFilter::compile(filter, grid, id).map_err(|e| match e {
+                    FilterError::Grid(e) => ConditionError::Grid(e),
+                    e => ConditionError::Filter(e),
+                })?,
+            }
+        }
         Condition::Any { conditions } => Compiled::Any(compile_all(conditions, grid, tiles)?),
         Condition::All { conditions } => Compiled::All(compile_all(conditions, grid, tiles)?),
         Condition::Not { condition } => Compiled::Not(Box::new(compile(condition, grid, tiles)?)),

@@ -22,6 +22,7 @@ use crate::{
     export::Provenance,
     grid::{Grid, GridError},
     layer::LayerKind,
+    object::Lattice,
     operator::{BuildError, Registry},
     pipeline::{Pipeline, StepError, StepSpec},
     tile::{TileError, TileRegistry},
@@ -51,6 +52,11 @@ pub struct PipelineSpec {
     pub seed: Option<u64>,
     pub salt: String,
     pub size: GridSize,
+    /// How many times the map may be made before giving up: an attempt
+    /// that fails a step (a `Check`, a step with nothing to pick) is thrown
+    /// away and the next one runs, each with its own randomness. 1 = no
+    /// retry.
+    pub attempts: u32,
     pub layers: Vec<LayerSpec>,
     /// Declared tiles, in order; `"empty"` (id 0) is implicit.
     pub tiles: Vec<String>,
@@ -66,6 +72,8 @@ pub struct PipelineSpec {
 pub struct LayerSpec {
     pub name: String,
     pub kind: LayerKind,
+    /// Only for an object layer: the slots its objects sit in.
+    pub lattice: Option<Lattice>,
 }
 
 /// A parsed file and what is wrong with it without being an error (a param
@@ -237,6 +245,8 @@ struct RawRoot {
     #[serde(default)]
     salt: String,
     size: GridSize,
+    #[serde(default = "one")]
+    attempts: u32,
     layers: Vec<LayerSpec>,
     #[serde(default)]
     tiles: Vec<String>,
@@ -264,6 +274,13 @@ struct RawStep {
 fn enabled() -> bool {
     true
 }
+
+fn one() -> u32 {
+    1
+}
+
+/// The most attempts a file may ask for: each runs every step again.
+pub const MAX_ATTEMPTS: u32 = 1000;
 
 fn empty_config() -> Value {
     Value::Object(serde_json::Map::new())
@@ -313,6 +330,12 @@ impl PipelineSpec {
         };
         let layers_and_tiles = check_grid(raw.size, &raw.layers, &raw.tiles);
         errors.extend(layers_and_tiles);
+        if !(1..=MAX_ATTEMPTS).contains(&raw.attempts) {
+            errors.push(Diagnostic::new(
+                "/attempts",
+                format!("{} attempts; from 1 to {MAX_ATTEMPTS}", raw.attempts),
+            ));
+        }
 
         let mut steps = Vec::with_capacity(raw.steps.len());
         for (i, value) in raw.steps.into_iter().enumerate() {
@@ -363,6 +386,7 @@ impl PipelineSpec {
             seed: raw.seed.map(|s| s.0),
             salt: raw.salt,
             size: raw.size,
+            attempts: raw.attempts,
             layers: raw.layers,
             tiles: raw.tiles,
             params,
@@ -394,6 +418,7 @@ impl PipelineSpec {
         Provenance {
             seed,
             salted: !salt.is_empty(),
+            attempt: 0,
             params: self.values.clone(),
         }
     }
@@ -413,8 +438,11 @@ impl PipelineSpec {
         };
         let mut grid = Grid::new(Bounds::new(Coord::ZERO, self.size));
         for layer in &self.layers {
-            grid.add_layer(layer.name.clone(), layer.kind)
-                .map_err(|e| fail("/layers", &e))?;
+            match layer.lattice {
+                Some(lattice) => grid.add_object_layer(layer.name.clone(), lattice),
+                None => grid.add_layer(layer.name.clone(), layer.kind),
+            }
+            .map_err(|e| fail("/layers", &e))?;
         }
         let tiles =
             TileRegistry::new(self.tiles.iter().cloned()).map_err(|e| fail("/tiles", &e))?;
@@ -451,7 +479,7 @@ impl PipelineSpec {
                 format!("{at}/operator")
             }
             BuildError::Config { path, .. } => format!("{at}/config{path}"),
-            BuildError::Invalid { field, .. } => {
+            BuildError::Invalid { field, .. } | BuildError::Filter { field, .. } => {
                 let mut p = format!("{at}/config");
                 push_key(&mut p, field);
                 p
@@ -586,6 +614,23 @@ fn check_grid(size: GridSize, layers: &[LayerSpec], tiles: &[String]) -> Vec<Dia
     }
     let names = layers.iter().map(|l| l.name.as_str());
     errors.extend(check_names("/layers", "layer", names, None));
+    for (i, layer) in layers.iter().enumerate() {
+        let Some(lattice) = &layer.lattice else {
+            continue;
+        };
+        let at = format!("/layers/{i}/lattice");
+        if layer.kind != LayerKind::Objects {
+            errors.push(Diagnostic::new(
+                at,
+                format!(
+                    "layer '{}' is {}; only an object layer has a lattice",
+                    layer.name, layer.kind
+                ),
+            ));
+        } else if let Some(problem) = lattice.problem() {
+            errors.push(Diagnostic::new(at, problem));
+        }
+    }
     let names = tiles.iter().map(String::as_str);
     errors.extend(check_names("/tiles", "tile", names, Some("empty")));
     if tiles.len() > u16::MAX as usize {
@@ -711,6 +756,8 @@ impl<'de> Deserialize<'de> for LayerSpec {
             name: String,
             #[serde(default = "tiles")]
             kind: LayerKind,
+            #[serde(default)]
+            lattice: Option<Lattice>,
         }
         fn tiles() -> LayerKind {
             LayerKind::Tiles
@@ -727,6 +774,7 @@ impl<'de> Deserialize<'de> for LayerSpec {
                 Ok(LayerSpec {
                     name: name.to_string(),
                     kind: LayerKind::Tiles,
+                    lattice: None,
                 })
             }
             fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<LayerSpec, A::Error> {
@@ -734,6 +782,7 @@ impl<'de> Deserialize<'de> for LayerSpec {
                 Ok(LayerSpec {
                     name: full.name,
                     kind: full.kind,
+                    lattice: full.lattice,
                 })
             }
         }

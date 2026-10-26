@@ -28,6 +28,7 @@ fn small() -> Grid {
 const SEED: Provenance = Provenance {
     seed: 512,
     salted: false,
+    attempt: 0,
     params: Vec::new(),
 };
 
@@ -156,6 +157,7 @@ fn the_seed_is_a_string_and_the_salt_is_never_written() {
     let p = Provenance {
         seed: u64::MAX,
         salted: true,
+        attempt: 0,
         params: Vec::new(),
     };
     let (v, _) = decode(&write(&small(), p, Encoding::Auto));
@@ -309,6 +311,7 @@ fn params_are_written_with_their_type_and_read_back_exactly() {
     let p = Provenance {
         seed: 1,
         salted: false,
+        attempt: 0,
         params: values
             .iter()
             .map(|(n, v)| (n.to_string(), v.clone()))
@@ -340,6 +343,7 @@ fn a_non_finite_param_fails_before_writing() {
     let p = Provenance {
         seed: 1,
         salted: false,
+        attempt: 0,
         params: vec![("x".to_string(), ParamValue::Number(f64::NAN))],
     };
     let mut out = Vec::new();

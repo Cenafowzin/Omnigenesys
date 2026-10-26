@@ -114,6 +114,19 @@ impl Generation {
         self.0.steps()
     }
 
+    /// The attempt running (or that made the map), from 0. When a step
+    /// fails and the file allows another attempt, `next` starts it: this
+    /// goes up and `done` back to 0.
+    pub fn attempt(&self) -> u32 {
+        self.0.attempt()
+    }
+
+    /// Why each earlier attempt was thrown away: JSON
+    /// `[{"step_id", "message"}]`.
+    pub fn failures(&self) -> String {
+        self.0.failures()
+    }
+
     /// Steps already run.
     pub fn done(&self) -> usize {
         self.0.done()
@@ -161,6 +174,12 @@ impl Generation {
         self.0
             .scalar(name)
             .ok_or_else(|| JsError::new(&format!("no scalar layer '{name}'")))
+    }
+
+    /// The object layers as JSON: lattice, boxes and props (see
+    /// [`api::Generation::objects`]).
+    pub fn objects(&self) -> String {
+        self.0.objects()
     }
 
     /// Every layer drawn over the one before it.

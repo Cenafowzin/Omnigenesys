@@ -122,19 +122,23 @@ fn the_dispatch_names_every_operator() {
             "CellularAutomaton",
             "Check",
             "Combine",
+            "ConnectObjects",
             "ConnectRooms",
             "Curve",
             "Fill",
+            "GrowObjects",
             "LinearGradient",
+            "MeasureObjects",
             "Noise",
+            "PlaceObjects",
             "PlaceRooms",
             "RadialGradient",
             "RegionSize",
-            "RoomGrid",
-            "Scatter"
+            "Scatter",
+            "TagObjects"
         ])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 14);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 18);
 }
 
 const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");

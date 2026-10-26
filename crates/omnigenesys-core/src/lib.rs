@@ -9,6 +9,7 @@ pub mod condition;
 pub mod coords;
 pub mod export;
 pub mod expr;
+pub mod filter;
 pub mod grid;
 pub mod layer;
 pub mod mask;

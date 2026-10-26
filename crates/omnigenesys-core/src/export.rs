@@ -75,6 +75,10 @@ pub enum Encoding {
 pub struct Provenance {
     pub seed: u64,
     pub salted: bool,
+    /// The attempt that made the map (a file's `attempts`), from 0.
+    /// Written only when above 0: the map is the same from the seed
+    /// alone, this only says how many tries it took.
+    pub attempt: u32,
     /// Every declared param with the value the map was made with (an
     /// override or the default), in declaration order.
     pub params: Vec<(String, ParamValue)>,
@@ -143,6 +147,10 @@ pub fn write_json<W: Write>(
     w.int(provenance.seed);
     w.raw("\",\n  \"salted\": ");
     w.raw(if provenance.salted { "true" } else { "false" });
+    if provenance.attempt > 0 {
+        w.raw(",\n  \"attempt\": ");
+        w.int(provenance.attempt);
+    }
     w.raw(",\n  \"params\": {");
     for (i, (name, value)) in provenance.params.iter().enumerate() {
         if i > 0 {

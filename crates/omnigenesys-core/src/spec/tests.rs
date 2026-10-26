@@ -65,7 +65,8 @@ fn reads_a_minimal_file_with_its_defaults() {
         spec.layers,
         [LayerSpec {
             name: "terrain".to_string(),
-            kind: LayerKind::Tiles
+            kind: LayerKind::Tiles,
+            lattice: None,
         }]
     );
     assert_eq!(spec.tiles, ["floor", "wall"]);

@@ -12,8 +12,9 @@ use omnigenesys_core::{
     access::Reach,
     export::{self, Encoding, Provenance},
     grid::Grid,
-    operator::{Dimensions, Registry, Scope},
-    pipeline::Pipeline,
+    object::Value as ObjectValue,
+    operator::{Dimensions, OpError, Registry, Scope},
+    pipeline::{self, Pipeline, RunError, StepError},
     spec::{self, Built, Diagnostic, PipelineSpec, Span},
     tile::{TileId, TileRegistry},
 };
@@ -239,6 +240,13 @@ fn steps(spec: &PipelineSpec, built: &Built) -> Value {
 /// the grid as the steps so far left it, its tiles, and how it was made.
 pub struct Generation {
     grid: Grid,
+    /// The grid as built, before any step: each attempt starts from it.
+    empty: Grid,
+    attempts: u32,
+    /// The attempt running now, from 0.
+    attempt: u32,
+    /// Why each attempt before it was thrown away.
+    failures: Vec<StepError<OpError>>,
     tiles: TileRegistry,
     pipeline: Pipeline,
     provenance: Provenance,
@@ -281,7 +289,11 @@ pub fn start(
     };
     let salt = salt.map_or_else(|| spec.salt.clone(), str::to_string);
     Ok(Generation {
+        empty: grid.clone(),
         grid,
+        attempts: spec.attempts,
+        attempt: 0,
+        failures: Vec::new(),
         tiles,
         pipeline,
         provenance: spec.provenance(seed, &salt),
@@ -313,25 +325,66 @@ fn error_json(pointer: &str, step_id: Option<&str>, message: &str) -> String {
 }
 
 impl Generation {
-    /// Runs the next step; `Ok(false)` when every step has run. On a
-    /// failing step, the JSON of `{"errors": [...]}`, pointing at it.
+    /// Runs the next step; `Ok(false)` when every step has run. A step
+    /// that fails as a map can fail (a `Check`) throws the attempt away
+    /// while the file allows more (`attempts`): the grid goes back to
+    /// empty, [`done`](Self::done) to 0 and [`attempt`](Self::attempt) up
+    /// by one, and this returns `Ok(true)`. Otherwise, the JSON of
+    /// `{"errors": [...]}`, pointing at the failing step.
     pub fn run_next(&mut self) -> Result<bool, String> {
         if self.done == self.pipeline.len() {
             return Ok(false);
         }
         let seed = self.provenance.seed;
-        self.pipeline
-            .run_step(self.done, &mut self.grid, &self.salt, seed)
-            .map_err(|e| {
+        let ran =
+            self.pipeline
+                .run_step_in(self.done, &mut self.grid, &self.salt, seed, self.attempt);
+        match ran {
+            Ok(()) => {
+                self.done += 1;
+                Ok(true)
+            }
+            Err(e) if pipeline::retries(&e.error) && self.attempt + 1 < self.attempts => {
+                self.failures.push(e);
+                self.attempt += 1;
+                self.provenance.attempt = self.attempt;
+                self.grid = self.empty.clone();
+                self.done = 0;
+                Ok(true)
+            }
+            Err(e) => {
                 let at = self
                     .file_ids
                     .iter()
                     .position(|id| *id == e.step_id)
                     .map_or_else(String::new, |i| format!("/steps/{i}"));
-                error_json(&at, Some(&e.step_id), &e.error.to_string())
-            })?;
-        self.done += 1;
-        Ok(true)
+                let step = e.step_id.clone();
+                let message = if self.failures.is_empty() || !pipeline::retries(&e.error) {
+                    e.error.to_string()
+                } else {
+                    let mut failures = std::mem::take(&mut self.failures);
+                    failures.push(e);
+                    RunError::GaveUp { failures }.to_string()
+                };
+                Err(error_json(&at, Some(&step), &message))
+            }
+        }
+    }
+
+    /// The attempt running (or that made the map), from 0.
+    pub fn attempt(&self) -> u32 {
+        self.attempt
+    }
+
+    /// Why each attempt before this one was thrown away, as JSON:
+    /// `[{"step_id", "message"}]`.
+    pub fn failures(&self) -> String {
+        let list: Vec<Value> = self
+            .failures
+            .iter()
+            .map(|f| json!({"step_id": f.step_id, "message": f.error.to_string()}))
+            .collect();
+        Value::Array(list).to_string()
     }
 
     /// Steps that run (the enabled ones).
@@ -411,6 +464,43 @@ impl Generation {
         out
     }
 
+    /// Every object layer as the steps so far left it, for an editor to
+    /// draw over the map: `[{"name", "lattice": {columns, rows, cell:
+    /// [w, h], origin: [x, y]} | null, "objects": [{"id", "kind", "bbox":
+    /// [x, y, w, h], "props": {name: value}}]}]`. A prop that names an
+    /// object is `{"object": id}`; a cell, `{"cell": [x, y, z]}`.
+    pub fn objects(&self) -> String {
+        let mut out = Vec::new();
+        for name in self.grid.names() {
+            let Ok(id) = self.grid.layer_id(name) else {
+                continue;
+            };
+            let Ok(layer) = self.grid.objects(id) else {
+                continue;
+            };
+            let lattice = layer.lattice().map(|l| {
+                json!({"columns": l.columns, "rows": l.rows,
+                       "cell": [l.cell.width, l.cell.height], "origin": [l.origin.x, l.origin.y]})
+            });
+            let objects: Vec<Value> = layer
+                .iter()
+                .map(|o| {
+                    let props: JsonMap<String, Value> = o
+                        .props
+                        .iter()
+                        .map(|(k, v)| (k.clone(), prop_json(v)))
+                        .collect();
+                    let b = o.bbox;
+                    json!({"id": o.id.get(), "kind": o.kind,
+                           "bbox": [b.origin.x, b.origin.y, b.size.width, b.size.height],
+                           "props": props})
+                })
+                .collect();
+            out.push(json!({"name": name, "lattice": lattice, "objects": objects}));
+        }
+        Value::Array(out).to_string()
+    }
+
     /// The map as output v2 JSON, the file engines read.
     pub fn to_json(&self) -> Result<String, String> {
         let mut out = Vec::new();
@@ -423,6 +513,18 @@ impl Generation {
         )
         .map_err(|e| e.to_string())?;
         String::from_utf8(out).map_err(|e| e.to_string())
+    }
+}
+
+fn prop_json(v: &ObjectValue) -> Value {
+    match v {
+        ObjectValue::Int(n) => json!(n),
+        ObjectValue::Float(x) => json!(x),
+        ObjectValue::Bool(b) => json!(b),
+        ObjectValue::Str(s) => json!(s),
+        ObjectValue::Cell(c) => json!({"cell": [c.x, c.y, c.z]}),
+        ObjectValue::Object(id) => json!({"object": id.get()}),
+        ObjectValue::List(l) => Value::Array(l.iter().map(prop_json).collect()),
     }
 }
 

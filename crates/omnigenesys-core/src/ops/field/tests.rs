@@ -718,6 +718,7 @@ fn a_scalar_layer_is_exported_and_reads_back() {
     let p = crate::export::Provenance {
         seed: 512,
         salted: false,
+        attempt: 0,
         params: Vec::new(),
     };
     export::write_json(&mut out, &g, &built.tiles, &p, Encoding::Auto).unwrap();

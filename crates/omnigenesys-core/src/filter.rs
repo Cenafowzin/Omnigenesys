@@ -1,0 +1,616 @@
+//! Object filters: which objects a step picks, or which empty slots of a
+//! lattice (desenho-pipelines §3.2; pesquisa 2026-10-25-operadores-de-
+//! objetos). The object side of a condition: a list is an implicit `all`,
+//! and nothing here compares with a fixed name — kinds, props and roles
+//! are the file's own words.
+//!
+//! Measures that do not change while a step runs (hops from the start,
+//! connections per room) are not filters: `MeasureObjects` writes them as
+//! props, and filters read props. What does change while a step places
+//! objects — how many objects are around a slot — is a filter
+//! (`neighbours`), so each pick sees the picks before it.
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::{
+    bounds::Bounds,
+    grid::{Grid, GridError, LayerId},
+    layer::LayerKind,
+    object::{Lattice, Object, ObjectLayer, Value},
+};
+
+/// One name or several.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged, expecting = "a name or a list of names")]
+pub enum Names {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Names {
+    pub fn names(&self) -> &[String] {
+        match self {
+            Names::One(n) => std::slice::from_ref(n),
+            Names::Many(ns) => ns,
+        }
+    }
+}
+
+/// A prop value as a file writes it: text, a whole number, a number, or
+/// true/false.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged, expecting = "text, a number or true/false")]
+pub enum Scalar {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+}
+
+impl Scalar {
+    pub fn to_value(&self) -> Value {
+        match self {
+            Scalar::Bool(b) => Value::Bool(*b),
+            Scalar::Int(n) => Value::Int(*n),
+            Scalar::Float(x) => Value::Float(*x),
+            Scalar::Str(s) => Value::Str(s.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged, expecting = "a value or a list of values")]
+pub enum Scalars {
+    One(Scalar),
+    Many(Vec<Scalar>),
+}
+
+impl Scalars {
+    fn values(&self) -> Vec<Value> {
+        match self {
+            Scalars::One(v) => vec![v.to_value()],
+            Scalars::Many(vs) => vs.iter().map(Scalar::to_value).collect(),
+        }
+    }
+}
+
+/// A whole number, or every whole number from `min` to `max` (both
+/// counted; either may be left out).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    untagged,
+    expecting = "a whole number, or {\"min\": ..., \"max\": ...}"
+)]
+pub enum IntRange {
+    Exact(i64),
+    Range(Between),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Between {
+    #[serde(default)]
+    pub min: Option<i64>,
+    #[serde(default)]
+    pub max: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ObjectFilter {
+    /// Its kind is one of these.
+    KindIs {
+        kind: Names,
+    },
+    /// The prop is set to one of these values (3 and 3.0 are the same).
+    PropIs {
+        name: String,
+        value: Scalars,
+    },
+    /// The prop is set, to anything.
+    HasProp {
+        name: String,
+    },
+    /// The prop is a number from `min` to `max` (both counted).
+    PropInRange {
+        name: String,
+        #[serde(default)]
+        min: Option<f64>,
+        #[serde(default)]
+        max: Option<f64>,
+    },
+    /// How many objects of the same layer are side by side with it
+    /// (sharing part of an edge; a corner is not enough) and pass `where`:
+    /// from `min` to `max`, both counted. For an empty slot, the objects
+    /// around the slot. A dead end is `max: 1`.
+    Neighbours {
+        #[serde(default)]
+        min: Option<u32>,
+        #[serde(default)]
+        max: Option<u32>,
+        #[serde(rename = "where", default)]
+        filter: Vec<ObjectFilter>,
+    },
+    /// Its place on the layer's lattice: column `x` and row `y`, from 0
+    /// (for an object that covers several slots, its first, row by row).
+    Slot {
+        #[serde(default)]
+        x: Option<IntRange>,
+        #[serde(default)]
+        y: Option<IntRange>,
+    },
+    /// One of its props `props` names an object of `layer` that passes
+    /// `where`: a connection into a secret room, a key and its lock.
+    RefersTo {
+        props: Names,
+        layer: String,
+        #[serde(rename = "where", default)]
+        filter: Vec<ObjectFilter>,
+    },
+    Any {
+        filters: Vec<ObjectFilter>,
+    },
+    Not {
+        filter: Box<ObjectFilter>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum FilterError {
+    #[error(transparent)]
+    Grid(#[from] GridError),
+    #[error("`slot` needs a layer with a lattice; '{layer}' has none")]
+    NoLattice { layer: String },
+    #[error("{what} needs at least one of `min` or `max`")]
+    NoBounds { what: &'static str },
+    #[error("{what} range is empty: min {min} is above max {max}")]
+    EmptyRange {
+        what: &'static str,
+        min: String,
+        max: String,
+    },
+    #[error("prop_is needs at least one value")]
+    NoValues,
+    #[error("`any` needs at least one filter")]
+    EmptyAny,
+}
+
+/// Filters resolved against a grid: layer names became ids, ranges were
+/// checked. Built once per step.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledFilter {
+    all: Vec<F>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum F {
+    Kind(Vec<String>),
+    PropIs(String, Vec<Value>),
+    HasProp(String),
+    PropRange(String, f64, f64),
+    Neighbours {
+        min: u32,
+        max: u32,
+        filter: Vec<F>,
+    },
+    Slot {
+        x: (i64, i64),
+        y: (i64, i64),
+    },
+    RefersTo {
+        props: Vec<String>,
+        layer: LayerId,
+        filter: Vec<F>,
+    },
+    Any(Vec<F>),
+    Not(Box<F>),
+}
+
+impl CompiledFilter {
+    /// `filters` (an implicit `all`) for objects of `layer`.
+    pub fn compile(
+        filters: &[ObjectFilter],
+        grid: &Grid,
+        layer: LayerId,
+    ) -> Result<CompiledFilter, FilterError> {
+        Ok(CompiledFilter {
+            all: compile_all(filters, grid, layer)?,
+        })
+    }
+
+    /// No filter: everything passes.
+    pub fn is_empty(&self) -> bool {
+        self.all.is_empty()
+    }
+
+    /// The other object layers it looks into (`refers_to`).
+    pub fn layers(&self) -> Vec<LayerId> {
+        let mut out = Vec::new();
+        layers(&self.all, &mut out);
+        out
+    }
+
+    /// Whether `subject`, of `layer`, passes.
+    pub fn test(&self, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
+        self.all.iter().all(|f| test(f, scene, layer, subject))
+    }
+}
+
+fn layers(fs: &[F], out: &mut Vec<LayerId>) {
+    for f in fs {
+        match f {
+            F::Neighbours { filter, .. } => layers(filter, out),
+            F::RefersTo { layer, filter, .. } => {
+                if !out.contains(layer) {
+                    out.push(*layer);
+                }
+                layers(filter, out);
+            }
+            F::Any(fs) => layers(fs, out),
+            F::Not(f) => layers(std::slice::from_ref(f), out),
+            _ => {}
+        }
+    }
+}
+
+fn compile_all(fs: &[ObjectFilter], grid: &Grid, layer: LayerId) -> Result<Vec<F>, FilterError> {
+    fs.iter().map(|f| compile(f, grid, layer)).collect()
+}
+
+fn compile(f: &ObjectFilter, grid: &Grid, layer: LayerId) -> Result<F, FilterError> {
+    Ok(match f {
+        ObjectFilter::KindIs { kind } => F::Kind(kind.names().to_vec()),
+        ObjectFilter::PropIs { name, value } => {
+            let values = value.values();
+            if values.is_empty() {
+                return Err(FilterError::NoValues);
+            }
+            F::PropIs(name.clone(), values)
+        }
+        ObjectFilter::HasProp { name } => F::HasProp(name.clone()),
+        ObjectFilter::PropInRange { name, min, max } => {
+            let (min, max) = match (*min, *max) {
+                (None, None) => {
+                    return Err(FilterError::NoBounds {
+                        what: "prop_in_range",
+                    });
+                }
+                (Some(a), Some(b)) if a > b => {
+                    return Err(FilterError::EmptyRange {
+                        what: "prop_in_range",
+                        min: a.to_string(),
+                        max: b.to_string(),
+                    });
+                }
+                (min, max) => (
+                    min.unwrap_or(f64::NEG_INFINITY),
+                    max.unwrap_or(f64::INFINITY),
+                ),
+            };
+            F::PropRange(name.clone(), min, max)
+        }
+        ObjectFilter::Neighbours { min, max, filter } => {
+            let (min, max) = match (*min, *max) {
+                (None, None) => return Err(FilterError::NoBounds { what: "neighbours" }),
+                (Some(a), Some(b)) if a > b => {
+                    return Err(FilterError::EmptyRange {
+                        what: "neighbours",
+                        min: a.to_string(),
+                        max: b.to_string(),
+                    });
+                }
+                (min, max) => (min.unwrap_or(0), max.unwrap_or(u32::MAX)),
+            };
+            F::Neighbours {
+                min,
+                max,
+                filter: compile_all(filter, grid, layer)?,
+            }
+        }
+        ObjectFilter::Slot { x, y } => {
+            let objects = grid.objects(layer)?;
+            if objects.lattice().is_none() {
+                return Err(FilterError::NoLattice {
+                    layer: grid.layer_name(layer).unwrap_or("?").to_string(),
+                });
+            }
+            let range = |r: &Option<IntRange>| -> Result<(i64, i64), FilterError> {
+                match r {
+                    None => Ok((i64::MIN, i64::MAX)),
+                    Some(IntRange::Exact(n)) => Ok((*n, *n)),
+                    Some(IntRange::Range(Between { min, max })) => match (*min, *max) {
+                        (None, None) => Err(FilterError::NoBounds { what: "slot" }),
+                        (Some(a), Some(b)) if a > b => Err(FilterError::EmptyRange {
+                            what: "slot",
+                            min: a.to_string(),
+                            max: b.to_string(),
+                        }),
+                        (a, b) => Ok((a.unwrap_or(i64::MIN), b.unwrap_or(i64::MAX))),
+                    },
+                }
+            };
+            F::Slot {
+                x: range(x)?,
+                y: range(y)?,
+            }
+        }
+        ObjectFilter::RefersTo {
+            props,
+            layer: target,
+            filter,
+        } => {
+            let id = grid.layer_id(target)?;
+            let found = grid.kind(id)?;
+            if found != LayerKind::Objects {
+                return Err(GridError::WrongLayerKind {
+                    name: target.clone(),
+                    expected: LayerKind::Objects,
+                    found,
+                }
+                .into());
+            }
+            F::RefersTo {
+                props: props.names().to_vec(),
+                layer: id,
+                filter: compile_all(filter, grid, id)?,
+            }
+        }
+        ObjectFilter::Any { filters } => {
+            if filters.is_empty() {
+                return Err(FilterError::EmptyAny);
+            }
+            F::Any(compile_all(filters, grid, layer)?)
+        }
+        ObjectFilter::Not { filter } => F::Not(Box::new(compile(filter, grid, layer)?)),
+    })
+}
+
+/// What a filter is asked about: an object of the layer (by its place in
+/// the layer's list), or an empty slot of its lattice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Subject {
+    Object(usize),
+    Slot(usize),
+}
+
+fn test(f: &F, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
+    let object = || match subject {
+        Subject::Object(i) => scene.objects(layer).get(i),
+        Subject::Slot(_) => None,
+    };
+    match f {
+        F::Kind(kinds) => object().is_some_and(|o| kinds.contains(&o.kind)),
+        F::PropIs(name, values) => object()
+            .and_then(|o| o.prop(name))
+            .is_some_and(|v| values.iter().any(|w| same(v, w))),
+        F::HasProp(name) => object().is_some_and(|o| o.prop(name).is_some()),
+        F::PropRange(name, min, max) => object()
+            .and_then(|o| number(o.prop(name)?))
+            .is_some_and(|x| *min <= x && x <= *max),
+        F::Neighbours { min, max, filter } => {
+            let n = scene
+                .neighbours(layer, subject)
+                .filter(|&j| {
+                    filter
+                        .iter()
+                        .all(|f| test(f, scene, layer, Subject::Object(j)))
+                })
+                .count();
+            u32::try_from(n).is_ok_and(|n| (*min..=*max).contains(&n))
+        }
+        F::Slot { x, y } => scene.slot_of(layer, subject).is_some_and(|(c, r)| {
+            (x.0..=x.1).contains(&i64::from(c)) && (y.0..=y.1).contains(&i64::from(r))
+        }),
+        F::RefersTo {
+            props,
+            layer: target,
+            filter,
+        } => object().is_some_and(|o| {
+            props
+                .iter()
+                .filter_map(|p| o.prop(p)?.as_object())
+                .any(|id| {
+                    scene
+                        .objects(*target)
+                        .iter()
+                        .position(|t| t.id == id)
+                        .is_some_and(|j| {
+                            filter
+                                .iter()
+                                .all(|f| test(f, scene, *target, Subject::Object(j)))
+                        })
+                })
+        }),
+        F::Any(fs) => fs.iter().any(|f| test(f, scene, layer, subject)),
+        F::Not(f) => !test(f, scene, layer, subject),
+    }
+}
+
+/// Equal as props: numbers by value, whatever their type.
+fn same(a: &Value, b: &Value) -> bool {
+    match (number(a), number(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+pub(crate) fn number(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int(n) => Some(*n as f64),
+        Value::Float(x) => Some(*x),
+        _ => None,
+    }
+}
+
+/// Whether two boxes are side by side: they do not overlap, and they
+/// share part of an edge (not only a corner). In x and y; z must overlap.
+pub fn touching(a: Bounds, b: Bounds) -> bool {
+    let span = |o: i32, n: u32| (i64::from(o), i64::from(o) + i64::from(n));
+    let (ax, bx) = (
+        span(a.origin.x, a.size.width),
+        span(b.origin.x, b.size.width),
+    );
+    let (ay, by) = (
+        span(a.origin.y, a.size.height),
+        span(b.origin.y, b.size.height),
+    );
+    let (az, bz) = (
+        span(a.origin.z, a.size.depth),
+        span(b.origin.z, b.size.depth),
+    );
+    let overlap = |p: (i64, i64), q: (i64, i64)| p.0 < q.1 && q.0 < p.1;
+    let meet = |p: (i64, i64), q: (i64, i64)| p.1 == q.0 || q.1 == p.0;
+    overlap(az, bz) && ((meet(ax, bx) && overlap(ay, by)) || (meet(ay, by) && overlap(ax, bx)))
+}
+
+/// The object layers one step looks at, copied when it starts. A step
+/// that adds objects adds them here too, so its later picks see them (a
+/// slot taken a moment ago is not empty any more).
+#[derive(Debug, Clone)]
+pub struct Scene {
+    map: Bounds,
+    layers: Vec<SceneLayer>,
+}
+
+#[derive(Debug, Clone)]
+struct SceneLayer {
+    id: LayerId,
+    lattice: Option<Lattice>,
+    objects: Vec<Object>,
+    /// With a lattice: the object in each slot, by its place in `objects`.
+    slots: Vec<Option<usize>>,
+}
+
+impl Scene {
+    pub fn new<'a>(
+        map: Bounds,
+        layers: impl IntoIterator<Item = (LayerId, &'a ObjectLayer)>,
+    ) -> Scene {
+        let mut scene = Scene {
+            map,
+            layers: Vec::new(),
+        };
+        for (id, layer) in layers {
+            if scene.layers.iter().any(|l| l.id == id) {
+                continue;
+            }
+            let lattice = layer.lattice().copied();
+            let mut entry = SceneLayer {
+                id,
+                lattice,
+                objects: Vec::new(),
+                slots: vec![None; lattice.map_or(0, |l| l.slots())],
+            };
+            for o in layer.iter() {
+                entry.push(map, o.clone());
+            }
+            scene.layers.push(entry);
+        }
+        scene
+    }
+
+    fn layer(&self, id: LayerId) -> &SceneLayer {
+        self.layers
+            .iter()
+            .find(|l| l.id == id)
+            .expect("every layer a step filters is in its scene")
+    }
+
+    fn layer_mut(&mut self, id: LayerId) -> &mut SceneLayer {
+        self.layers
+            .iter_mut()
+            .find(|l| l.id == id)
+            .expect("every layer a step filters is in its scene")
+    }
+
+    pub fn map(&self) -> Bounds {
+        self.map
+    }
+
+    pub fn objects(&self, layer: LayerId) -> &[Object] {
+        &self.layer(layer).objects
+    }
+
+    pub fn lattice(&self, layer: LayerId) -> Option<&Lattice> {
+        self.layer(layer).lattice.as_ref()
+    }
+
+    /// Adds an object; its index in [`objects`](Self::objects).
+    pub fn push(&mut self, layer: LayerId, object: Object) -> usize {
+        let map = self.map;
+        self.layer_mut(layer).push(map, object)
+    }
+
+    pub fn set_prop(&mut self, layer: LayerId, i: usize, name: &str, value: Value) {
+        self.layer_mut(layer).objects[i].set(name, value);
+    }
+
+    pub fn remove_prop(&mut self, layer: LayerId, i: usize, name: &str) {
+        self.layer_mut(layer).objects[i].remove(name);
+    }
+
+    /// The object in slot `i`, if any.
+    pub fn in_slot(&self, layer: LayerId, i: usize) -> Option<usize> {
+        self.layer(layer).slots.get(i).copied().flatten()
+    }
+
+    /// The empty slots, row by row; none without a lattice.
+    pub fn empty_slots(&self, layer: LayerId) -> Vec<usize> {
+        let l = self.layer(layer);
+        (0..l.slots.len())
+            .filter(|&i| l.slots[i].is_none())
+            .collect()
+    }
+
+    /// The cells `subject` covers.
+    pub fn bounds(&self, layer: LayerId, subject: Subject) -> Option<Bounds> {
+        let l = self.layer(layer);
+        match subject {
+            Subject::Object(i) => l.objects.get(i).map(|o| o.bbox),
+            Subject::Slot(i) => l.lattice.and_then(|lat| {
+                (i < lat.slots()).then(|| {
+                    let (c, r) = lat.slot(i);
+                    lat.bounds(self.map, c, r)
+                })
+            }),
+        }
+    }
+
+    /// Column and row of `subject` on the lattice.
+    pub fn slot_of(&self, layer: LayerId, subject: Subject) -> Option<(u32, u32)> {
+        let l = self.layer(layer);
+        let lat = l.lattice?;
+        let i = match subject {
+            Subject::Slot(i) => i,
+            Subject::Object(i) => *lat.footprint(self.map, l.objects.get(i)?.bbox).first()?,
+        };
+        Some(lat.slot(i))
+    }
+
+    /// The objects side by side with `subject`, in the layer's order.
+    pub fn neighbours(&self, layer: LayerId, subject: Subject) -> impl Iterator<Item = usize> + '_ {
+        let b = self.bounds(layer, subject);
+        let objects = &self.layer(layer).objects;
+        (0..objects.len()).filter(move |&j| {
+            subject != Subject::Object(j) && b.is_some_and(|b| touching(b, objects[j].bbox))
+        })
+    }
+}
+
+impl SceneLayer {
+    fn push(&mut self, map: Bounds, object: Object) -> usize {
+        let i = self.objects.len();
+        if let Some(lat) = self.lattice {
+            for s in lat.footprint(map, object.bbox) {
+                self.slots[s].get_or_insert(i);
+            }
+        }
+        self.objects.push(object);
+        i
+    }
+}
+
+#[cfg(test)]
+mod tests;

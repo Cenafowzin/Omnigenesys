@@ -176,9 +176,21 @@ pub struct ReadHandle {
     pub(crate) layer: LayerId,
 }
 
+impl ReadHandle {
+    pub fn layer(self) -> LayerId {
+        self.layer
+    }
+}
+
 /// Permission to write a layer, obtained from
 /// [`BuildContext::write`](crate::operator::BuildContext::write).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WriteHandle {
     pub(crate) layer: LayerId,
+}
+
+impl WriteHandle {
+    pub fn layer(self) -> LayerId {
+        self.layer
+    }
 }

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use omnigenesys_core::export::{self, Encoding};
+use omnigenesys_core::export::{self, Encoding, Provenance};
 use omnigenesys_core::operator::{Dimensions, Registry, Scope};
 use omnigenesys_core::spec::{self, Built, MAX_NUMBER_SEED, PipelineSpec};
 
@@ -171,7 +171,7 @@ fn generate(registry: &Registry, g: Generate) -> Result<(), Failed> {
     };
     let (text, spec) = load(&g.pipeline, &g.params)?;
     let Built {
-        mut grid,
+        grid,
         tiles,
         pipeline,
     } = build(registry, &g.pipeline, &text, &spec)?;
@@ -187,9 +187,26 @@ fn generate(registry: &Registry, g: Generate) -> Result<(), Failed> {
         }
     };
     let salt = g.salt.unwrap_or_else(|| spec.salt.clone());
-    pipeline.run(&mut grid, &salt, seed).map_err(fail)?;
-
-    let provenance = spec.provenance(seed, &salt);
+    let made = pipeline
+        .run_attempts(&grid, &salt, seed, spec.attempts)
+        .map_err(fail)?;
+    if made.attempt > 0 {
+        eprintln!(
+            "attempt {} of {} made the map; the ones before failed at: {}",
+            made.attempt + 1,
+            spec.attempts,
+            made.failures
+                .iter()
+                .map(|f| f.step_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    let grid = made.grid;
+    let provenance = Provenance {
+        attempt: made.attempt,
+        ..spec.provenance(seed, &salt)
+    };
     let encoding = g.encoding.into();
     match &g.output {
         Some(path) => {

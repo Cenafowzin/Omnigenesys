@@ -25,10 +25,24 @@ pub struct StepRng {
 
 impl StepRng {
     pub fn new(salt: &str, seed: u64, step_id: &str) -> StepRng {
+        StepRng::with_attempt(salt, seed, step_id, 0)
+    }
+
+    /// The randomness of the step in attempt `attempt` of a map (a file's
+    /// `attempts`: a failed attempt is made again). Attempt 0 is
+    /// [`new`](Self::new), byte for byte. A later attempt hashes a zero
+    /// byte (never in a step id) and the attempt number, little-endian,
+    /// after the step id: the seed and the salt stay the user's, so no
+    /// attempt can land on another seed's map.
+    pub fn with_attempt(salt: &str, seed: u64, step_id: &str, attempt: u32) -> StepRng {
         let mut hasher = Sha256::new();
         hasher.update(salt.as_bytes());
         hasher.update(seed.to_le_bytes());
         hasher.update(step_id.as_bytes());
+        if attempt > 0 {
+            hasher.update([0u8]);
+            hasher.update(attempt.to_le_bytes());
+        }
         let key: [u8; 32] = hasher.finalize().into();
 
         // The `at` key comes from ChaCha stream 1 of the same key; the main

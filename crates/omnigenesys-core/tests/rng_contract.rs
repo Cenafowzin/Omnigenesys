@@ -48,3 +48,37 @@ fn at_golden_vectors() {
         assert_eq!(rng.at_draw(c, draw), expected, "{c:?} draw {draw}");
     }
 }
+
+/// Frozen 2026-10-26: the key of a retried attempt (a file's `attempts`).
+/// Attempt 0 is the stream vector above; later ones hash `\0` and the
+/// attempt number after the step id. Cross-checked against an independent
+/// Python implementation (SHA-256 → ChaCha8 stream 0).
+#[test]
+fn attempt_golden_vectors() {
+    let first16 = |salt: &str, seed: u64, step: &str, attempt: u32| {
+        let mut rng = StepRng::with_attempt(salt, seed, step, attempt);
+        let mut buf = [0u8; 16];
+        rng.fill_bytes(&mut buf);
+        hex(&buf)
+    };
+    assert_eq!(
+        first16("", 512, "base_floor", 0),
+        "d7b2685b307f802b247afbaa6df54e93"
+    );
+    assert_eq!(
+        first16("", 512, "base_floor", 1),
+        "99d19883585da55fe4e259331b956258"
+    );
+    assert_eq!(
+        first16("", 512, "base_floor", 2),
+        "78be35a17bf7b66a7a7edbc0f88193f9"
+    );
+    assert_eq!(
+        first16("", 512, "base_floor", u32::MAX),
+        "dc7e137c06894bc76b46a5fb672aa228"
+    );
+    assert_eq!(
+        first16("s", 7, "chefe", 3),
+        "f01cdefa25a1e7a6f98645cfe3f7bbf7"
+    );
+}

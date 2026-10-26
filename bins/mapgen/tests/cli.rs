@@ -224,16 +224,20 @@ fn schema_and_operators_go_to_stdout() {
          CellularAutomaton  2d     local\n\
          Check              2d/3d  global\n\
          Combine            2d/3d  local\n\
+         ConnectObjects     2d/3d  global\n\
          ConnectRooms       2d     global\n\
          Curve              2d/3d  local\n\
          Fill               2d/3d  local\n\
+         GrowObjects        2d     global\n\
          LinearGradient     2d/3d  local\n\
+         MeasureObjects     2d/3d  global\n\
          Noise              2d     local\n\
+         PlaceObjects       2d     global\n\
          PlaceRooms         2d     global\n\
          RadialGradient     2d/3d  local\n\
          RegionSize         2d/3d  global\n\
-         RoomGrid           2d     global\n\
-         Scatter            2d/3d  local\n"
+         Scatter            2d/3d  local\n\
+         TagObjects         2d/3d  global\n"
     );
 }
 

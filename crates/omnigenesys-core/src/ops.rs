@@ -8,13 +8,17 @@
 //!   `LinearGradient`, `Combine`, `Curve`.
 //! - `shape`: `CellularAutomaton`, `RegionSize`.
 //! - `validate`: `Check`.
-//! - `rooms`: dungeons — rooms, connections, roles (`RoomGrid`,
-//!   `PlaceRooms`, `ConnectRooms`, `AssignRooms`; being split, §2.14).
+//! - `objects`: `PlaceObjects`, `GrowObjects`, `MeasureObjects`,
+//!   `TagObjects`, `ConnectObjects`.
+//! - `rooms`: the classic dungeon's rooms, connections and roles
+//!   (`PlaceRooms`, `ConnectRooms`, `AssignRooms`; to be split into the
+//!   object operators with the dungeon recipe, §2.14).
 //!
 //! The folders are for reading the code; the public paths stay flat
 //! (`ops::Fill`), so moving an operator between them breaks nobody.
 
 mod field;
+mod objects;
 mod rooms;
 mod scatter;
 mod shape;
@@ -26,9 +30,14 @@ pub use field::{
     LinearGradient, LinearGradientConfig, Noise, NoiseConfig, NoiseKind, RadialGradient,
     RadialGradientConfig, SmoothOrder,
 };
+pub use objects::{
+    ConnectObjects, ConnectObjectsConfig, Count, CountRange, CountWord, Expand, Frontier,
+    GrowObjects, GrowObjectsConfig, Link, Measure, MeasureObjects, MeasureObjectsConfig,
+    OnExhausted, OrderKey, PlaceObjects, PlaceObjectsConfig, Retire, TagObjects, TagObjectsConfig,
+};
 pub use rooms::{
     AssignRooms, AssignRoomsConfig, ConnectRooms, ConnectRoomsConfig, CorridorShape, Pick,
-    PlaceRooms, PlaceRoomsConfig, RoleRule, RoomGrid, RoomGridConfig, Strategy,
+    PlaceRooms, PlaceRoomsConfig, RoleRule, Strategy,
 };
 pub use scatter::{Scatter, ScatterConfig};
 pub use shape::{
@@ -49,14 +58,18 @@ pub(crate) fn register_builtins(r: &mut Registry) {
     add::<CellularAutomaton>(r);
     add::<Check>(r);
     add::<Combine>(r);
+    add::<ConnectObjects>(r);
     add::<ConnectRooms>(r);
     add::<Curve>(r);
     add::<Fill>(r);
+    add::<GrowObjects>(r);
     add::<LinearGradient>(r);
+    add::<MeasureObjects>(r);
     add::<Noise>(r);
+    add::<PlaceObjects>(r);
     add::<PlaceRooms>(r);
     add::<RadialGradient>(r);
     add::<RegionSize>(r);
-    add::<RoomGrid>(r);
     add::<Scatter>(r);
+    add::<TagObjects>(r);
 }

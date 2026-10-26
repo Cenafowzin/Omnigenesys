@@ -96,7 +96,7 @@ fn archipelago() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn isaac_floor() {
-    assert_eq!(fingerprint(ISAAC), 2_971_879_752_968_153_115);
+    assert_eq!(fingerprint(ISAAC), 827_253_375_940_226_750);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
@@ -104,6 +104,28 @@ fn isaac_floor() {
 fn classic_dungeon() {
     assert_eq!(fingerprint(DUNGEON), 926_442_635_239_489_141);
 }
+
+/// A deep floor (stage 6: 20 rooms, growth reseeded from the start) made
+/// after failed attempts: every attempt's randomness, the same on both.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn retried_attempts() {
+    let params = [("estagio".to_string(), "6".to_string())];
+    let map = api::generate(&Registry::with_builtins(), ISAAC, &params, Some(2), None).unwrap();
+    let failures: serde_json::Value = serde_json::from_str(&map.failures()).unwrap();
+    assert_eq!(
+        (map.attempt(), failures.as_array().unwrap().len()),
+        (ATTEMPT, ATTEMPT as usize)
+    );
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in map.to_json().unwrap().bytes() {
+        h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    assert_eq!(h, RETRIED);
+}
+
+const ATTEMPT: u32 = 5;
+const RETRIED: u64 = 15_758_665_605_549_804_499;
 
 /// Expressions over params: the same values to the last bit on both. JSON
 /// writes each f64 in its shortest exact form, so equal text is equal bits.

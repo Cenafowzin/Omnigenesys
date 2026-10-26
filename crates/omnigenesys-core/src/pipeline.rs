@@ -110,13 +110,62 @@ impl Pipeline {
         salt: &str,
         seed: u64,
     ) -> Result<(), StepError<OpError>> {
+        self.run_step_in(i, grid, salt, seed, 0)
+    }
+
+    /// [`run_step`](Self::run_step) in attempt `attempt` of the map, each
+    /// attempt with its own randomness ([`StepRng::with_attempt`]).
+    ///
+    /// # Panics
+    ///
+    /// If `i` is not below [`len`](Self::len).
+    pub fn run_step_in(
+        &self,
+        i: usize,
+        grid: &mut Grid,
+        salt: &str,
+        seed: u64,
+        attempt: u32,
+    ) -> Result<(), StepError<OpError>> {
         let step = &self.steps[i];
-        let rng = StepRng::new(salt, seed, &step.id);
+        let rng = StepRng::with_attempt(salt, seed, &step.id, attempt);
         let mut ctx = crate::operator::Context::new(grid, &step.access, rng);
         step.operator.execute(&mut ctx).map_err(|error| StepError {
             step_id: step.id.clone(),
             error,
         })
+    }
+
+    /// Makes the map from `empty` (the grid as built), up to `attempts`
+    /// times. A step that fails as a map can fail — a `Check`, a step with
+    /// nothing to pick ([`OpError::Failed`]) — throws the attempt away, and
+    /// the next starts again from `empty` with its own randomness. Any
+    /// other error is a bug in the pipeline and stops at once.
+    pub fn run_attempts(
+        &self,
+        empty: &Grid,
+        salt: &str,
+        seed: u64,
+        attempts: u32,
+    ) -> Result<Made, RunError> {
+        let mut failures = Vec::new();
+        for attempt in 0..attempts {
+            let mut grid = empty.clone();
+            match (0..self.len())
+                .try_for_each(|i| self.run_step_in(i, &mut grid, salt, seed, attempt))
+            {
+                Ok(()) => {
+                    return Ok(Made {
+                        grid,
+                        attempt,
+                        failures,
+                    });
+                }
+                Err(e) if retries(&e.error) => failures.push(e),
+                Err(e) => return Err(RunError::Step(e)),
+            }
+        }
+        Err(RunError::GaveUp { failures })
     }
 
     /// Enabled steps, the ones that run.
@@ -139,6 +188,57 @@ impl Pipeline {
             .iter()
             .find(|s| s.id == step_id)
             .map(|s| &s.access)
+    }
+}
+
+/// Whether a step error is the map failing (worth another attempt) rather
+/// than the pipeline being wrong.
+pub fn retries(e: &OpError) -> bool {
+    matches!(e, OpError::Failed { .. })
+}
+
+/// A map made by [`Pipeline::run_attempts`].
+#[derive(Debug)]
+pub struct Made {
+    pub grid: Grid,
+    /// The attempt that made it, from 0.
+    pub attempt: u32,
+    /// Why each attempt before it was thrown away.
+    pub failures: Vec<StepError<OpError>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Error)]
+pub enum RunError {
+    /// Every attempt failed; why, attempt by attempt.
+    #[error("{}", gave_up(.failures))]
+    GaveUp { failures: Vec<StepError<OpError>> },
+    #[error(transparent)]
+    Step(StepError<OpError>),
+}
+
+/// "every one of the 50 attempts failed (cota 31 times, chefe 19 times);
+/// the last: step 'cota': ...".
+fn gave_up(failures: &[StepError<OpError>]) -> String {
+    let mut times: Vec<(&str, usize)> = Vec::new();
+    for f in failures {
+        match times.iter_mut().find(|(id, _)| *id == f.step_id) {
+            Some((_, n)) => *n += 1,
+            None => times.push((&f.step_id, 1)),
+        }
+    }
+    times.sort_by(|a, b| b.1.cmp(&a.1));
+    let counts: Vec<String> = times
+        .iter()
+        .map(|(id, n)| format!("{id} {n} time{}", if *n == 1 { "" } else { "s" }))
+        .collect();
+    match failures.last() {
+        Some(last) if failures.len() == 1 => format!("the map failed: {last}"),
+        Some(last) => format!(
+            "every one of the {} attempts failed ({}); the last: {last}",
+            failures.len(),
+            counts.join(", ")
+        ),
+        None => "no attempt was made".to_string(),
     }
 }
 

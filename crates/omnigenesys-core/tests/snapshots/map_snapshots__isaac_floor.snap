@@ -1,8 +1,9 @@
 ---
 source: crates/omnigenesys-core/tests/map_snapshots.rs
+assertion_line: 178
 expression: "terrain_of(include_str!(\"pipelines/isaac.json\"), DUNGEON_GLYPHS)"
 ---
-legend:   empty   pedra . chao # parede + porta ? porta_secreta B chao_chefe T chao_tesouro $ chao_loja s chao_secreto S chao_inicio
+legend:   empty   pedra . chao # parede + porta ? porta_secreta B chao_chefe T chao_tesouro $ chao_loja X chao_sacrificio s chao_secreto S chao_inicio
                                                                                                                                        
                                                                                                                                        
                                                                                                                                        
@@ -21,48 +22,48 @@ legend:   empty   pedra . chao # parede + porta ? porta_secreta B chao_chefe T c
                                                                                                                                        
                                                                                                                                        
                                                                                                                                        
-                                             ###############                                                                           
-                                             #$$$$$$$$$$$$$#                                                                           
-                                             #$$$$$$$$$$$$$#                                                                           
-                                             #$$$$$$$$$$$$$#                                                                           
-                                             #$$$$$$$$$$$$$#                                                                           
-                                             #$$$$$$$$$$$$$#                                                                           
-                                             #$$$$$$$$$$$$$#                                                                           
-                                             #$$$$$$$$$$$$$#                                                                           
-                                             #######+#######                                                                           
-                              ######################+######################                                                            
-                              #BBBBBBBBBBBBB##.............##sssssssssssss#                                                            
-                              #BBBBBBBBBBBBB##.............##sssssssssssss#                                                            
-                              #BBBBBBBBBBBBB##.............##sssssssssssss#                                                            
-                              #BBBBBBBBBBBBB++.............??sssssssssssss#                                                            
-                              #BBBBBBBBBBBBB##.............##sssssssssssss#                                                            
-                              #BBBBBBBBBBBBB##.............##sssssssssssss#                                                            
-                              #BBBBBBBBBBBBB##.............##sssssssssssss#                                                            
-                              ######################+##############?#######                                                            
-                                             #######+##############?####################################################               
-                                             #.............##SSSSSSSSSSSSS##.............##.............##.............#               
-                                             #.............##SSSSSSSSSSSSS##.............##.............##.............#               
-                                             #.............##SSSSSSSSSSSSS##.............##.............##.............#               
-                                             #.............++SSSSSSSSSSSSS++.............++.............++.............#               
-                                             #.............##SSSSSSSSSSSSS##.............##.............##.............#               
-                                             #.............##SSSSSSSSSSSSS##.............##.............##.............#               
-                                             #.............##SSSSSSSSSSSSS##.............##.............##.............#               
-                                             ######################+####################################################               
+                                                                                                                                       
+                                                                                                                                       
+                                                                                                                                       
+                                                                                                                                       
+                                                                                                                                       
+                                                                                                                                       
+                                                                                                                                       
+                                                                                                                                       
+                                                                                                                                       
+                              ###############                                                                                          
+                              #sssssssssssss#                                                                                          
+                              #sssssssssssss#                                                                                          
+                              #sssssssssssss#                                                                                          
+                              #sssssssssssss#                                                                                          
+                              #sssssssssssss#                                                                                          
+                              #sssssssssssss#                                                                                          
+                              #sssssssssssss#                                                                                          
+                              #######?#######                                                                                          
+               ######################?####################################################                                             
+               #BBBBBBBBBBBBB##.............##.............##SSSSSSSSSSSSS##sssssssssssss#                                             
+               #BBBBBBBBBBBBB##.............##.............##SSSSSSSSSSSSS##sssssssssssss#                                             
+               #BBBBBBBBBBBBB##.............##.............##SSSSSSSSSSSSS##sssssssssssss#                                             
+               #BBBBBBBBBBBBB++.............++.............++SSSSSSSSSSSSS??sssssssssssss#                                             
+               #BBBBBBBBBBBBB##.............##.............##SSSSSSSSSSSSS##sssssssssssss#                                             
+               #BBBBBBBBBBBBB##.............##.............##SSSSSSSSSSSSS##sssssssssssss#                                             
+               #BBBBBBBBBBBBB##.............##.............##SSSSSSSSSSSSS##sssssssssssss#                                             
+               ######################+#############################+##############?#######                                             
+                              #######+#######               #######+##############?#######                                             
+                              #.............#               #.............##TTTTTTTTTTTTT#                                             
+                              #.............#               #.............##TTTTTTTTTTTTT#                                             
+                              #.............#               #.............##TTTTTTTTTTTTT#                                             
+                              #.............#               #.............++TTTTTTTTTTTTT#                                             
+                              #.............#               #.............##TTTTTTTTTTTTT#                                             
+                              #.............#               #.............##TTTTTTTTTTTTT#                                             
+                              #.............#               #.............##TTTTTTTTTTTTT#                                             
+                              ###############               #######+######################                                             
                                                             #######+#######                                                            
-                                                            #.............#                                                            
-                                                            #.............#                                                            
-                                                            #.............#                                                            
-                                                            #.............#                                                            
-                                                            #.............#                                                            
-                                                            #.............#                                                            
-                                                            #.............#                                                            
-                                                            #######+#######                                                            
-                                             ######################+######################                                             
-                                             #TTTTTTTTTTTTT##.............##.............#                                             
-                                             #TTTTTTTTTTTTT##.............##.............#                                             
-                                             #TTTTTTTTTTTTT##.............##.............#                                             
-                                             #TTTTTTTTTTTTT++.............++.............#                                             
-                                             #TTTTTTTTTTTTT##.............##.............#                                             
-                                             #TTTTTTTTTTTTT##.............##.............#                                             
-                                             #TTTTTTTTTTTTT##.............##.............#                                             
-                                             #############################################
+                                                            #$$$$$$$$$$$$$#                                                            
+                                                            #$$$$$$$$$$$$$#                                                            
+                                                            #$$$$$$$$$$$$$#                                                            
+                                                            #$$$$$$$$$$$$$#                                                            
+                                                            #$$$$$$$$$$$$$#                                                            
+                                                            #$$$$$$$$$$$$$#                                                            
+                                                            #$$$$$$$$$$$$$#                                                            
+                                                            ###############

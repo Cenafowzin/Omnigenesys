@@ -1,12 +1,13 @@
 use crate::bounds::Bounds;
 use crate::coords::GridSize;
 use crate::layer::{AnyLayer, Layer, LayerKind};
-use crate::object::{ObjectIds, ObjectLayer};
+use crate::object::{Lattice, ObjectIds, ObjectLayer};
 use crate::tile::TileId;
 use indexmap::IndexMap;
 use thiserror::Error;
 
-#[derive(Debug)]
+/// Cloned to start a map again from the empty grid (a retried attempt).
+#[derive(Debug, Clone)]
 pub struct Grid {
     /// The cells this grid holds: the whole map, or one chunk of it with
     /// its padding.
@@ -97,6 +98,21 @@ impl Grid {
             LayerKind::Scalar => AnyLayer::Scalar(Layer::new(self.bounds, 0.0).map_err(too_large)?),
             LayerKind::Objects => AnyLayer::Objects(ObjectLayer::new(self.bounds)),
         };
+        let (index, _) = self.layers.insert_full(name, layer);
+        Ok(LayerId(index))
+    }
+
+    /// An object layer whose objects sit on `lattice`.
+    pub fn add_object_layer(
+        &mut self,
+        name: impl Into<String>,
+        lattice: Lattice,
+    ) -> Result<LayerId, GridError> {
+        let name = name.into();
+        if self.layers.contains_key(&name) {
+            return Err(GridError::DuplicateLayer { name });
+        }
+        let layer = AnyLayer::Objects(ObjectLayer::with_lattice(self.bounds, lattice));
         let (index, _) = self.layers.insert_full(name, layer);
         Ok(LayerId(index))
     }

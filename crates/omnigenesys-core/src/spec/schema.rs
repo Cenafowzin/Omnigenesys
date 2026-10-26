@@ -10,9 +10,9 @@
 use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value, json};
 
-use crate::{condition::Condition, operator::Registry};
+use crate::{condition::Condition, object::Lattice, operator::Registry};
 
-use super::{FORMAT_VERSION, MAX_NUMBER_SEED};
+use super::{FORMAT_VERSION, MAX_ATTEMPTS, MAX_NUMBER_SEED};
 
 /// Where `{"$param": "name"}` is defined in the schema.
 const PARAM_REF: &str = "#/definitions/ParamRef";
@@ -34,6 +34,7 @@ pub fn schema(registry: &Registry) -> Value {
     }
     let mut condition = generator.subschema_for::<Condition>().to_value();
     allow_params(&mut condition);
+    let lattice = generator.subschema_for::<Lattice>().to_value();
 
     let mut definitions = generator.take_definitions(true);
     for definition in definitions.values_mut() {
@@ -62,6 +63,10 @@ pub fn schema(registry: &Registry) -> Value {
                 ]
             },
             "salt": {"type": "string"},
+            "attempts": {
+                "description": "Times the map may be made before giving up; an attempt that fails a step is thrown away and the next runs with its own randomness.",
+                "type": "integer", "minimum": 1, "maximum": MAX_ATTEMPTS, "default": 1
+            },
             "size": {
                 "type": "object",
                 "additionalProperties": false,
@@ -83,7 +88,8 @@ pub fn schema(registry: &Registry) -> Value {
                             "required": ["name"],
                             "properties": {
                                 "name": {"type": "string", "minLength": 1},
-                                "kind": {"enum": ["tiles", "scalar", "objects"]}
+                                "kind": {"enum": ["tiles", "scalar", "objects"]},
+                                "lattice": lattice
                             }
                         }
                     ]

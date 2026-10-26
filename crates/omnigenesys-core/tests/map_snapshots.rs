@@ -122,13 +122,14 @@ fn cave_2d() {
 fn terrain_of(text: &str, glyphs: &[(&str, char)]) -> String {
     let spec = PipelineSpec::parse(text).unwrap().spec;
     let Built {
-        mut grid,
+        grid,
         tiles,
         pipeline,
     } = spec.build(&Registry::with_builtins()).unwrap();
-    pipeline
-        .run(&mut grid, &spec.salt, spec.seed.unwrap())
-        .unwrap();
+    let grid = pipeline
+        .run_attempts(&grid, &spec.salt, spec.seed.unwrap(), spec.attempts)
+        .unwrap_or_else(|e| panic!("{e}"))
+        .grid;
     let terrain = grid.tiles(grid.layer_id("terreno").unwrap()).unwrap();
     let mut out = String::from("legend:");
     for (name, g) in glyphs {
@@ -164,12 +165,14 @@ const DUNGEON_GLYPHS: &[(&str, char)] = &[
     ("chao_chefe", 'B'),
     ("chao_tesouro", 'T'),
     ("chao_loja", '$'),
+    ("chao_sacrificio", 'X'),
     ("chao_secreto", 's'),
     ("chao_inicio", 'S'),
 ];
 
-/// Isaac: rooms on a grid, doors between neighbours, roles by graph
-/// distance: tests/pipelines/isaac.json.
+/// Isaac: rooms grown on a lattice from the start, special rooms in dead
+/// ends, the boss the farthest, doors between neighbours, the floor made
+/// again until it has enough dead ends: tests/pipelines/isaac.json.
 #[test]
 fn isaac_floor() {
     insta::assert_snapshot!(terrain_of(
