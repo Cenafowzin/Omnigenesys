@@ -119,7 +119,7 @@ impl Operator for TagObjects {
             .into_iter()
             .filter_map(|s| match s {
                 Subject::Object(i) => Some(i),
-                Subject::Slot(_) => None,
+                Subject::Slot(_) | Subject::Box(_) => None,
             })
             .collect();
         for (i, o) in layer.iter_mut().enumerate() {

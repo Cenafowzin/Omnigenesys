@@ -1,11 +1,12 @@
 {
   "version": 2,
-  "description": "Masmorra clássica",
+  "description": "Masmorra clássica: salas soltas sem se tocar, a árvore mais curta entre elas e alguns laços, corredores em L, início ao acaso e chefe na sala mais longe",
   "seed": 512,
   "size": {
     "width": 96,
     "height": 64
   },
+  "attempts": 20,
   "layers": [
     "terreno",
     {
@@ -36,50 +37,221 @@
     },
     {
       "id": "salas",
-      "operator": "PlaceRooms",
+      "operator": "PlaceObjects",
       "config": {
-        "layer": "terreno",
-        "rooms": "salas",
-        "floor": "chao",
-        "wall": "parede",
-        "tries": 40
-      }
-    },
-    {
-      "id": "corredores",
-      "operator": "ConnectRooms",
-      "config": {
-        "rooms": "salas",
-        "connections": "conexoes",
-        "layer": "terreno",
-        "floor": "chao",
-        "door": "porta",
-        "strategy": "mst",
-        "loops": 0.15,
-        "corridor": "l"
-      }
-    },
-    {
-      "id": "papeis",
-      "operator": "AssignRooms",
-      "config": {
-        "rooms": "salas",
-        "connections": "conexoes",
-        "layer": "terreno",
-        "floor": "chao",
-        "roles": [
-          {
-            "role": "start",
-            "pick": "first",
-            "tile": "chao_inicio"
+        "layer": "salas",
+        "kind": "sala",
+        "count": {
+          "min": 8,
+          "max": 14
+        },
+        "size": {
+          "width": {
+            "min": 6,
+            "max": 11
           },
+          "height": {
+            "min": 6,
+            "max": 11
+          }
+        },
+        "tries": 30,
+        "where": [
           {
-            "role": "boss",
-            "pick": "farthest",
-            "tile": "chao_chefe"
+            "type": "overlaps",
+            "margin": 1,
+            "max": 0
           }
         ]
       }
+    },
+    {
+      "id": "arvore",
+      "operator": "ConnectObjects",
+      "config": {
+        "objects": "salas",
+        "layer": "conexoes",
+        "strategy": "mst",
+        "kind": "corredor"
+      }
+    },
+    {
+      "id": "lacos",
+      "operator": "ConnectObjects",
+      "config": {
+        "objects": "salas",
+        "layer": "conexoes",
+        "strategy": "nearest",
+        "k": 3,
+        "min_hops": 4,
+        "keep": 0.5,
+        "kind": "corredor"
+      }
+    },
+    {
+      "id": "paredes",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "parede"
+      },
+      "conditions": [
+        {
+          "type": "in_object",
+          "layer": "salas",
+          "part": "wall"
+        }
+      ]
+    },
+    {
+      "id": "pisos",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "chao"
+      },
+      "conditions": [
+        {
+          "type": "in_object",
+          "layer": "salas",
+          "part": "inside"
+        }
+      ]
+    },
+    {
+      "id": "corredores",
+      "operator": "CarvePaths",
+      "config": {
+        "connections": "conexoes",
+        "objects": "salas",
+        "layer": "terreno",
+        "tile": "chao",
+        "shape": "l"
+      }
+    },
+    {
+      "id": "portas",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "porta"
+      },
+      "conditions": [
+        {
+          "type": "in_object",
+          "layer": "salas",
+          "part": "wall"
+        },
+        {
+          "type": "tile_is",
+          "layer": "terreno",
+          "tile": "chao"
+        }
+      ]
+    },
+    {
+      "id": "inicio",
+      "operator": "TagObjects",
+      "config": {
+        "layer": "salas",
+        "order_by": [
+          {
+            "by": "random"
+          }
+        ],
+        "set": {
+          "role": "inicio"
+        }
+      }
+    },
+    {
+      "id": "distancia",
+      "operator": "MeasureObjects",
+      "config": {
+        "layer": "salas",
+        "into": "distancia",
+        "measure": {
+          "type": "distance",
+          "from": [
+            {
+              "type": "prop_is",
+              "name": "role",
+              "value": "inicio"
+            }
+          ],
+          "connections": "conexoes"
+        }
+      }
+    },
+    {
+      "id": "chefe",
+      "operator": "TagObjects",
+      "config": {
+        "layer": "salas",
+        "where": [
+          {
+            "type": "not",
+            "filter": {
+              "type": "has_prop",
+              "name": "role"
+            }
+          }
+        ],
+        "order_by": [
+          {
+            "by": "prop",
+            "name": "distancia",
+            "desc": true
+          }
+        ],
+        "set": {
+          "role": "chefe"
+        }
+      }
+    },
+    {
+      "id": "piso_inicio",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "chao_inicio"
+      },
+      "conditions": [
+        {
+          "type": "in_object",
+          "layer": "salas",
+          "part": "inside",
+          "where": [
+            {
+              "type": "prop_is",
+              "name": "role",
+              "value": "inicio"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "piso_chefe",
+      "operator": "Fill",
+      "config": {
+        "layer": "terreno",
+        "tile": "chao_chefe"
+      },
+      "conditions": [
+        {
+          "type": "in_object",
+          "layer": "salas",
+          "part": "inside",
+          "where": [
+            {
+              "type": "prop_is",
+              "name": "role",
+              "value": "chefe"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

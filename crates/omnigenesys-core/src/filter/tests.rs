@@ -75,6 +75,54 @@ fn touching_needs_a_shared_edge_not_a_corner() {
 }
 
 #[test]
+fn overlapping_grows_the_first_box_by_the_margin() {
+    let a = b(0, 0, 5, 4);
+    assert!(overlapping(a, b(4, 3, 3, 3), 0), "sharing a cell");
+    assert!(!overlapping(a, b(5, 0, 5, 4), 0), "side by side");
+    assert!(overlapping(a, b(5, 0, 5, 4), 1), "side by side, margin 1");
+    assert!(!overlapping(a, b(6, 0, 5, 4), 1), "one cell of gap");
+    assert!(
+        overlapping(a, b(6, 0, 5, 4), 2),
+        "one cell of gap, margin 2"
+    );
+    assert!(
+        overlapping(a, b(5, 4, 2, 2), 1),
+        "a corner counts once grown"
+    );
+    assert!(overlapping(a, b(-6, -5, 5, 4), 2), "above and to the left");
+}
+
+#[test]
+fn overlaps_counts_objects_and_candidate_boxes() {
+    // Rooms in slots (0,0) and (1,0) touch; (2,2) is far.
+    let (grid, id) = world(&[
+        ((0, 0), json!({})),
+        ((1, 0), json!({})),
+        ((2, 2), json!({})),
+    ]);
+    assert_eq!(
+        passing(&grid, id, json!([{"type": "overlaps", "max": 0}])),
+        [0, 1, 2],
+        "boxes side by side do not overlap"
+    );
+    assert_eq!(
+        passing(
+            &grid,
+            id,
+            json!([{"type": "overlaps", "margin": 1, "min": 1}])
+        ),
+        [0, 1],
+        "with a margin they do"
+    );
+    // A box no object fills yet, over the first room.
+    let f = CompiledFilter::compile(&filters(json!([{"type": "overlaps", "max": 0}])), &grid, id)
+        .unwrap();
+    let scene = Scene::new(grid.map(), [(id, grid.objects(id).unwrap())]);
+    assert!(!f.test(&scene, id, Subject::Box(b(2, 2, 3, 3))));
+    assert!(f.test(&scene, id, Subject::Box(b(10, 0, 3, 3))));
+}
+
+#[test]
 fn a_footprint_is_the_slots_a_box_overlaps() {
     let l = lattice();
     let map = b(0, 0, 15, 12);

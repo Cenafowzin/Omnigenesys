@@ -521,7 +521,7 @@ fn a_bug_is_not_retried() {
 
 #[test]
 fn layers_without_a_lattice_say_so() {
-    for op in ["PlaceObjects", "GrowObjects"] {
+    for (op, field) in [("PlaceObjects", "size"), ("GrowObjects", "layer")] {
         let mut config = json!({"layer": "solta", "count": 1});
         if op == "PlaceObjects" {
             config["kind"] = json!("x");
@@ -536,7 +536,7 @@ fn layers_without_a_lattice_say_so() {
             "{op}: {}",
             e[0].message
         );
-        assert_eq!(e[0].pointer, "/steps/0/config/layer");
+        assert_eq!(e[0].pointer, format!("/steps/0/config/{field}"));
     }
     // A lattice on a tile layer, in the file.
     let mut p = pipeline(json!([]));
@@ -548,6 +548,211 @@ fn layers_without_a_lattice_say_so() {
         e[0].message
     );
     assert_eq!(e[0].pointer, "/layers/0/lattice");
+}
+
+/// `n` rooms of 5 to 9 cells at random places on "solta", a cell of rock
+/// between any two.
+fn loose(count: Json) -> Json {
+    json!({"id": "salas", "operator": "PlaceObjects", "config": {
+        "layer": "solta", "kind": "sala", "count": count,
+        "size": {"width": {"min": 5, "max": 9}, "height": {"min": 5, "max": 9}},
+        "where": [{"type": "overlaps", "margin": 1, "max": 0}]}})
+}
+
+#[test]
+fn loose_boxes_fit_the_map_their_size_and_their_margin() {
+    let g = run(&pipeline(json!([loose(json!(12))])));
+    let rooms = objects(&g, "solta");
+    assert_eq!(rooms.len(), 12);
+    let map = g.map();
+    for (i, r) in rooms.iter().enumerate() {
+        let s = r.bbox.size;
+        assert!(
+            (5..=9).contains(&s.width) && (5..=9).contains(&s.height),
+            "{s:?}"
+        );
+        assert!(r.bbox.origin.x >= 0 && r.bbox.origin.y >= 0);
+        assert!(r.bbox.origin.x as u32 + s.width <= map.size.width);
+        assert!(r.bbox.origin.y as u32 + s.height <= map.size.height);
+        for q in &rooms[i + 1..] {
+            assert!(
+                !crate::filter::overlapping(r.bbox, q.bbox, 1),
+                "{:?} and {:?} closer than a cell",
+                r.bbox,
+                q.bbox
+            );
+        }
+    }
+    // The same seed, the same rooms; another seed, others.
+    let again = objects(&run(&pipeline(json!([loose(json!(12))]))), "solta");
+    assert_eq!(rooms, again);
+    let other = objects(
+        &run_seed(&pipeline(json!([loose(json!(12))])), 7).unwrap(),
+        "solta",
+    );
+    assert_ne!(rooms, other);
+}
+
+#[test]
+fn loose_boxes_that_never_fit_fail_the_step() {
+    // 60 × 60 boxes on a 135 × 72 map: two never fit side by side.
+    let mut step = loose(json!({"min": 3, "max": 3}));
+    step["config"]["size"] = json!({"width": 60, "height": 60});
+    let e = run_seed(&pipeline(json!([step])), 1).unwrap_err();
+    assert!(e.contains("placed 2, fewer than the 3 asked for"), "{e}");
+    assert!(e.contains("none of the 30 boxes drawn"), "{e}");
+}
+
+#[test]
+fn size_and_tries_belong_to_layers_without_a_lattice() {
+    let fails = |config: Json, field: &str, says: &str| {
+        let e = build(&pipeline(
+            json!([{"id": "a", "operator": "PlaceObjects", "config": config}]),
+        ))
+        .err()
+        .unwrap();
+        assert_eq!(e[0].pointer, format!("/steps/0/config/{field}"));
+        assert!(e[0].message.contains(says), "{}", e[0].message);
+    };
+    let size = json!({"width": 3, "height": 3});
+    fails(
+        json!({"layer": "salas", "kind": "x", "size": size}),
+        "size",
+        "takes a slot's size",
+    );
+    fails(
+        json!({"layer": "salas", "kind": "x", "tries": 5}),
+        "tries",
+        "every empty slot is a candidate",
+    );
+    fails(
+        json!({"layer": "solta", "kind": "x", "size": size, "count": "all"}),
+        "count",
+        "there is no \"all\"",
+    );
+    fails(
+        json!({"layer": "solta", "kind": "x", "size": size, "tries": 0}),
+        "tries",
+        "is not between 1 and 1000",
+    );
+    fails(
+        json!({"layer": "solta", "kind": "x", "size": {"width": {"min": 4, "max": 2}, "height": 3}}),
+        "size.width",
+        "min is not above max",
+    );
+}
+
+/// Each object's connections in `layer`, by id; and whether a pair is
+/// joined twice.
+fn graph(g: &Grid, layer: &str) -> (std::collections::BTreeMap<u32, Vec<u32>>, bool) {
+    let mut out: std::collections::BTreeMap<u32, Vec<u32>> = Default::default();
+    let mut twice = false;
+    for c in objects(g, layer) {
+        let end = |p: &str| c.prop(p).and_then(Value::as_object).unwrap().0;
+        let (a, b) = (end("from"), end("to"));
+        twice |= out.get(&a).is_some_and(|n| n.contains(&b));
+        out.entry(a).or_default().push(b);
+        out.entry(b).or_default().push(a);
+    }
+    (out, twice)
+}
+
+fn connect(id: &str, config: Json) -> Json {
+    let mut c = json!({"objects": "solta", "layer": "conexoes"});
+    c.as_object_mut()
+        .unwrap()
+        .extend(config.as_object().unwrap().clone());
+    json!({"id": id, "operator": "ConnectObjects", "config": c})
+}
+
+#[test]
+fn the_shortest_tree_joins_everything_once() {
+    let g = run(&pipeline(json!([
+        loose(json!(12)),
+        connect("t", json!({"strategy": "mst"}))
+    ])));
+    let (links, twice) = graph(&g, "conexoes");
+    assert!(!twice);
+    assert_eq!(objects(&g, "conexoes").len(), 11, "a tree over 12");
+    // Every room reached from the first.
+    let rooms = objects(&g, "solta");
+    let mut seen = vec![rooms[0].id.0];
+    let mut i = 0;
+    while i < seen.len() {
+        for &n in &links[&seen[i]] {
+            if !seen.contains(&n) {
+                seen.push(n);
+            }
+        }
+        i += 1;
+    }
+    assert_eq!(seen.len(), 12);
+}
+
+#[test]
+fn a_second_step_adds_only_what_its_rules_let_through() {
+    let tree = |extra: Json| {
+        let g = run(&pipeline(json!([
+            loose(json!(12)),
+            connect("t", json!({"strategy": "mst"})),
+            connect("l", extra)
+        ])));
+        let (_, twice) = graph(&g, "conexoes");
+        assert!(!twice, "a pair joined twice");
+        objects(&g, "conexoes").len() - 11
+    };
+    // Each room's nearest is always in the shortest tree: nothing new.
+    assert_eq!(tree(json!({"strategy": "nearest", "k": 1})), 0);
+    // Nothing kept, or no pair far enough apart in a 12-room tree.
+    assert_eq!(tree(json!({"strategy": "nearest", "keep": 0})), 0);
+    assert_eq!(tree(json!({"strategy": "nearest", "min_hops": 12})), 0);
+    // Loops, then fewer of them as they must save more.
+    let all = tree(json!({"strategy": "nearest"}));
+    let far = tree(json!({"strategy": "nearest", "min_hops": 4}));
+    assert!(all > 0);
+    assert!(far < all, "{far} of {all}");
+    // A chain: each to the one before.
+    let g = run(&pipeline(json!([
+        loose(json!(5)),
+        connect("c", json!({"strategy": "chain"}))
+    ])));
+    let rooms = objects(&g, "solta");
+    let ends: Vec<(u32, u32)> = objects(&g, "conexoes")
+        .iter()
+        .map(|c| {
+            let end = |p: &str| c.prop(p).and_then(Value::as_object).unwrap().0;
+            (end("from"), end("to"))
+        })
+        .collect();
+    let want: Vec<(u32, u32)> = rooms.windows(2).map(|w| (w[0].id.0, w[1].id.0)).collect();
+    assert_eq!(ends, want);
+}
+
+#[test]
+fn connect_options_belong_to_their_strategy() {
+    let fails = |config: Json, field: &str, says: &str| {
+        let e = build(&pipeline(json!([connect("c", config)])))
+            .err()
+            .unwrap();
+        assert_eq!(e[0].pointer, format!("/steps/0/config/{field}"));
+        assert!(e[0].message.contains(says), "{}", e[0].message);
+    };
+    fails(json!({"strategy": "mst", "k": 2}), "k", "only `nearest`");
+    fails(
+        json!({"strategy": "nearest", "k": 0}),
+        "k",
+        "not between 1 and 16",
+    );
+    fails(
+        json!({"strategy": "mst", "min_hops": 0}),
+        "min_hops",
+        "lets every pair",
+    );
+    fails(
+        json!({"strategy": "mst", "keep": 2}),
+        "keep",
+        "not between 0 and 1",
+    );
 }
 
 #[test]

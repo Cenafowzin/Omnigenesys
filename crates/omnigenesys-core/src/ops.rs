@@ -10,16 +10,14 @@
 //! - `validate`: `Check`.
 //! - `objects`: `PlaceObjects`, `GrowObjects`, `MeasureObjects`,
 //!   `TagObjects`, `ConnectObjects`.
-//! - `rooms`: the classic dungeon's rooms, connections and roles
-//!   (`PlaceRooms`, `ConnectRooms`, `AssignRooms`; to be split into the
-//!   object operators with the dungeon recipe, §2.14).
+//! - `paths`: `CarvePaths`.
 //!
 //! The folders are for reading the code; the public paths stay flat
 //! (`ops::Fill`), so moving an operator between them breaks nobody.
 
 mod field;
 mod objects;
-mod rooms;
+mod paths;
 mod scatter;
 mod shape;
 mod terrain;
@@ -33,12 +31,10 @@ pub use field::{
 pub use objects::{
     ConnectObjects, ConnectObjectsConfig, Count, CountRange, CountWord, Expand, Frontier,
     GrowObjects, GrowObjectsConfig, Link, Measure, MeasureObjects, MeasureObjectsConfig,
-    OnExhausted, OrderKey, PlaceObjects, PlaceObjectsConfig, Retire, TagObjects, TagObjectsConfig,
+    OnExhausted, OrderKey, PlaceObjects, PlaceObjectsConfig, Retire, Side, Size, TagObjects,
+    TagObjectsConfig,
 };
-pub use rooms::{
-    AssignRooms, AssignRoomsConfig, ConnectRooms, ConnectRoomsConfig, CorridorShape, Pick,
-    PlaceRooms, PlaceRoomsConfig, RoleRule, Strategy,
-};
+pub use paths::{CarvePaths, CarvePathsConfig, PathShape};
 pub use scatter::{Scatter, ScatterConfig};
 pub use shape::{
     CellularAutomaton, CellularAutomatonConfig, Connectivity, Outside, RegionSize, RegionSizeConfig,
@@ -54,12 +50,12 @@ fn add<O: OperatorType>(r: &mut Registry) {
 }
 
 pub(crate) fn register_builtins(r: &mut Registry) {
-    add::<AssignRooms>(r);
+    add::<CarvePaths>(r);
     add::<CellularAutomaton>(r);
     add::<Check>(r);
     add::<Combine>(r);
     add::<ConnectObjects>(r);
-    add::<ConnectRooms>(r);
+
     add::<Curve>(r);
     add::<Fill>(r);
     add::<GrowObjects>(r);
@@ -67,7 +63,7 @@ pub(crate) fn register_builtins(r: &mut Registry) {
     add::<MeasureObjects>(r);
     add::<Noise>(r);
     add::<PlaceObjects>(r);
-    add::<PlaceRooms>(r);
+
     add::<RadialGradient>(r);
     add::<RegionSize>(r);
     add::<Scatter>(r);

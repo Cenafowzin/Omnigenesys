@@ -254,7 +254,7 @@ impl Order {
                 Subject::Object(i) => scene.objects(layer)[i]
                     .prop(name)
                     .and_then(crate::filter::number),
-                Subject::Slot(_) => None,
+                Subject::Slot(_) | Subject::Box(_) => None,
             },
             Key::Neighbours(f) => Some(neighbours(Some(f)) as f64),
             Key::Score { expr, random } => {

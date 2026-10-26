@@ -18,7 +18,7 @@ pub use grow_objects::{
     Expand, GrowObjects, GrowObjectsConfig, OnExhausted, Pick as Frontier, Retire,
 };
 pub use measure_objects::{Measure, MeasureObjects, MeasureObjectsConfig};
-pub use place_objects::{PlaceObjects, PlaceObjectsConfig};
+pub use place_objects::{PlaceObjects, PlaceObjectsConfig, Side, Size};
 pub use tag_objects::{TagObjects, TagObjectsConfig};
 
 #[cfg(test)]

@@ -133,6 +133,20 @@ pub enum ObjectFilter {
         #[serde(rename = "where", default)]
         filter: Vec<ObjectFilter>,
     },
+    /// How many objects of the same layer its box overlaps once grown by
+    /// `margin` cells on every side, and pass `where`: from `min` to `max`,
+    /// both counted. Rooms with at least one cell of rock between their
+    /// walls: `margin: 1, max: 0` (Brogue's `roomFitsAt`).
+    Overlaps {
+        #[serde(default)]
+        margin: u32,
+        #[serde(default)]
+        min: Option<u32>,
+        #[serde(default)]
+        max: Option<u32>,
+        #[serde(rename = "where", default)]
+        filter: Vec<ObjectFilter>,
+    },
     /// Its place on the layer's lattice: column `x` and row `y`, from 0
     /// (for an object that covers several slots, its first, row by row).
     Slot {
@@ -195,6 +209,12 @@ enum F {
         max: u32,
         filter: Vec<F>,
     },
+    Overlaps {
+        margin: u32,
+        min: u32,
+        max: u32,
+        filter: Vec<F>,
+    },
     Slot {
         x: (i64, i64),
         y: (i64, i64),
@@ -241,7 +261,7 @@ impl CompiledFilter {
 fn layers(fs: &[F], out: &mut Vec<LayerId>) {
     for f in fs {
         match f {
-            F::Neighbours { filter, .. } => layers(filter, out),
+            F::Neighbours { filter, .. } | F::Overlaps { filter, .. } => layers(filter, out),
             F::RefersTo { layer, filter, .. } => {
                 if !out.contains(layer) {
                     out.push(*layer);
@@ -292,18 +312,22 @@ fn compile(f: &ObjectFilter, grid: &Grid, layer: LayerId) -> Result<F, FilterErr
             F::PropRange(name.clone(), min, max)
         }
         ObjectFilter::Neighbours { min, max, filter } => {
-            let (min, max) = match (*min, *max) {
-                (None, None) => return Err(FilterError::NoBounds { what: "neighbours" }),
-                (Some(a), Some(b)) if a > b => {
-                    return Err(FilterError::EmptyRange {
-                        what: "neighbours",
-                        min: a.to_string(),
-                        max: b.to_string(),
-                    });
-                }
-                (min, max) => (min.unwrap_or(0), max.unwrap_or(u32::MAX)),
-            };
+            let (min, max) = count_range("neighbours", *min, *max)?;
             F::Neighbours {
+                min,
+                max,
+                filter: compile_all(filter, grid, layer)?,
+            }
+        }
+        ObjectFilter::Overlaps {
+            margin,
+            min,
+            max,
+            filter,
+        } => {
+            let (min, max) = count_range("overlaps", *min, *max)?;
+            F::Overlaps {
+                margin: *margin,
                 min,
                 max,
                 filter: compile_all(filter, grid, layer)?,
@@ -367,18 +391,44 @@ fn compile(f: &ObjectFilter, grid: &Grid, layer: LayerId) -> Result<F, FilterErr
     })
 }
 
+/// A count's range, both ends counted; at least one must be given.
+fn count_range(
+    what: &'static str,
+    min: Option<u32>,
+    max: Option<u32>,
+) -> Result<(u32, u32), FilterError> {
+    match (min, max) {
+        (None, None) => Err(FilterError::NoBounds { what }),
+        (Some(a), Some(b)) if a > b => Err(FilterError::EmptyRange {
+            what,
+            min: a.to_string(),
+            max: b.to_string(),
+        }),
+        (min, max) => Ok((min.unwrap_or(0), max.unwrap_or(u32::MAX))),
+    }
+}
+
 /// What a filter is asked about: an object of the layer (by its place in
-/// the layer's list), or an empty slot of its lattice.
+/// the layer's list), an empty slot of its lattice, or a box no object
+/// fills yet (a place drawn for a new object, on a layer without one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subject {
     Object(usize),
     Slot(usize),
+    Box(Bounds),
 }
 
 fn test(f: &F, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
     let object = || match subject {
         Subject::Object(i) => scene.objects(layer).get(i),
-        Subject::Slot(_) => None,
+        Subject::Slot(_) | Subject::Box(_) => None,
+    };
+    let within =
+        |n: usize, min: u32, max: u32| u32::try_from(n).is_ok_and(|n| (min..=max).contains(&n));
+    let passes = |filter: &[F], j: usize| {
+        filter
+            .iter()
+            .all(|f| test(f, scene, layer, Subject::Object(j)))
     };
     match f {
         F::Kind(kinds) => object().is_some_and(|o| kinds.contains(&o.kind)),
@@ -392,13 +442,21 @@ fn test(f: &F, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
         F::Neighbours { min, max, filter } => {
             let n = scene
                 .neighbours(layer, subject)
-                .filter(|&j| {
-                    filter
-                        .iter()
-                        .all(|f| test(f, scene, layer, Subject::Object(j)))
-                })
+                .filter(|&j| passes(filter, j))
                 .count();
-            u32::try_from(n).is_ok_and(|n| (*min..=*max).contains(&n))
+            within(n, *min, *max)
+        }
+        F::Overlaps {
+            margin,
+            min,
+            max,
+            filter,
+        } => {
+            let n = scene
+                .overlapping(layer, subject, *margin)
+                .filter(|&j| passes(filter, j))
+                .count();
+            within(n, *min, *max)
         }
         F::Slot { x, y } => scene.slot_of(layer, subject).is_some_and(|(c, r)| {
             (x.0..=x.1).contains(&i64::from(c)) && (y.0..=y.1).contains(&i64::from(r))
@@ -463,6 +521,24 @@ pub fn touching(a: Bounds, b: Bounds) -> bool {
     let overlap = |p: (i64, i64), q: (i64, i64)| p.0 < q.1 && q.0 < p.1;
     let meet = |p: (i64, i64), q: (i64, i64)| p.1 == q.0 || q.1 == p.0;
     overlap(az, bz) && ((meet(ax, bx) && overlap(ay, by)) || (meet(ay, by) && overlap(ax, bx)))
+}
+
+/// Whether `a`, grown by `margin` cells on every side in x and y, overlaps
+/// `b`. With `margin` 0, whether they share a cell. z must overlap.
+pub fn overlapping(a: Bounds, b: Bounds, margin: u32) -> bool {
+    let span = |o: i32, n: u32| (i64::from(o), i64::from(o) + i64::from(n));
+    let grow = |(lo, hi): (i64, i64)| (lo - i64::from(margin), hi + i64::from(margin));
+    let overlap = |p: (i64, i64), q: (i64, i64)| p.0 < q.1 && q.0 < p.1;
+    overlap(
+        grow(span(a.origin.x, a.size.width)),
+        span(b.origin.x, b.size.width),
+    ) && overlap(
+        grow(span(a.origin.y, a.size.height)),
+        span(b.origin.y, b.size.height),
+    ) && overlap(
+        span(a.origin.z, a.size.depth),
+        span(b.origin.z, b.size.depth),
+    )
 }
 
 /// The object layers one step looks at, copied when it starts. A step
@@ -575,6 +651,7 @@ impl Scene {
                     lat.bounds(self.map, c, r)
                 })
             }),
+            Subject::Box(b) => Some(b),
         }
     }
 
@@ -585,6 +662,7 @@ impl Scene {
         let i = match subject {
             Subject::Slot(i) => i,
             Subject::Object(i) => *lat.footprint(self.map, l.objects.get(i)?.bbox).first()?,
+            Subject::Box(b) => *lat.footprint(self.map, b).first()?,
         };
         Some(lat.slot(i))
     }
@@ -595,6 +673,22 @@ impl Scene {
         let objects = &self.layer(layer).objects;
         (0..objects.len()).filter(move |&j| {
             subject != Subject::Object(j) && b.is_some_and(|b| touching(b, objects[j].bbox))
+        })
+    }
+
+    /// The objects `subject`'s box overlaps once grown by `margin`, in the
+    /// layer's order; not `subject` itself.
+    pub fn overlapping(
+        &self,
+        layer: LayerId,
+        subject: Subject,
+        margin: u32,
+    ) -> impl Iterator<Item = usize> + '_ {
+        let b = self.bounds(layer, subject);
+        let objects = &self.layer(layer).objects;
+        (0..objects.len()).filter(move |&j| {
+            subject != Subject::Object(j)
+                && b.is_some_and(|b| overlapping(b, objects[j].bbox, margin))
         })
     }
 }
