@@ -1,11 +1,12 @@
 {
   "version": 2,
-  "description": "Cave: noise smoothed by the 4-5 rule, only its largest open area, then a solid border.",
+  "description": "Cave: noise smoothed by the 4-5 rule, a solid border, then only its largest open area; made again if that area is too small.",
   "seed": 512,
   "size": {
     "width": 64,
     "height": 32
   },
+  "attempts": 20,
   "layers": [
     "terrain",
     {
@@ -84,6 +85,21 @@
       }
     },
     {
+      "id": "border",
+      "operator": "Fill",
+      "description": "The outermost ring of the map is wall.",
+      "config": {
+        "layer": "terrain",
+        "tile": "wall"
+      },
+      "conditions": [
+        {
+          "type": "edge_distance",
+          "max": 0
+        }
+      ]
+    },
+    {
       "id": "areas",
       "operator": "RegionSize",
       "description": "Size and rank (1 = largest) of every open area.",
@@ -98,7 +114,7 @@
     {
       "id": "big_enough",
       "operator": "Check",
-      "description": "The largest open area must have at least 300 cells, or the map is thrown away.",
+      "description": "The largest open area must have at least 300 cells, or the map is made again (up to `attempts` times).",
       "config": {
         "min": 300,
         "message": "the largest open area is too small"
@@ -125,21 +141,6 @@
           "type": "scalar_in_range",
           "layer": "rank",
           "min": 2
-        }
-      ]
-    },
-    {
-      "id": "border",
-      "operator": "Fill",
-      "description": "The outermost ring of the map is wall.",
-      "config": {
-        "layer": "terrain",
-        "tile": "wall"
-      },
-      "conditions": [
-        {
-          "type": "edge_distance",
-          "max": 0
         }
       ]
     }

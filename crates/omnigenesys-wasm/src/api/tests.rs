@@ -233,7 +233,7 @@ fn failures_come_back_as_errors_to_show() {
             .unwrap(),
     );
     assert_eq!(e["errors"][0]["step_id"], "big_enough");
-    assert_eq!(e["errors"][0]["pointer"], "/steps/4");
+    assert_eq!(e["errors"][0]["pointer"], "/steps/5");
     assert!(
         e["errors"][0]["message"]
             .as_str()
@@ -277,14 +277,17 @@ fn step_by_step_is_the_same_map_as_all_at_once() {
 
 #[test]
 fn a_failing_step_is_reported_when_it_runs() {
-    let strict = CAVE.replacen("\"min\": 300", "\"min\": 100000", 1);
+    // One attempt: with more, the failure would start the map again.
+    let strict = CAVE
+        .replacen("\"min\": 300", "\"min\": 100000", 1)
+        .replacen("\"attempts\": 20", "\"attempts\": 1", 1);
     let mut g = start(&registry(), &strict, &[], None, None).unwrap();
-    for _ in 0..4 {
+    for _ in 0..5 {
         assert!(g.run_next().unwrap());
     }
     let e = parse(&g.run_next().unwrap_err());
     assert_eq!(e["errors"][0]["step_id"], "big_enough");
-    assert_eq!(g.done(), 4, "the failed step does not count");
+    assert_eq!(g.done(), 5, "the failed step does not count");
 }
 
 #[test]

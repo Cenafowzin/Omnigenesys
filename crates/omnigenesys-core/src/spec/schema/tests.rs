@@ -173,17 +173,17 @@ fn accepts_the_cave_and_checks_the_automaton_config() {
     assert!(rejects(
         &|v| v["steps"][2]["config"]["iterations"] = json!(0)
     ));
-    assert!(rejects(&|v| v["steps"][4]["config"]["thickness"] = json!(0)));
+    assert!(rejects(&|v| v["steps"][5]["config"]["thickness"] = json!(0)));
     assert!(rejects(
-        &|v| v["steps"][3]["config"]["connectivity"] = json!("eight")
+        &|v| v["steps"][4]["config"]["connectivity"] = json!("eight")
     ));
     assert!(rejects(&|v| {
-        v["steps"][3]["config"]
+        v["steps"][4]["config"]
             .as_object_mut()
             .unwrap()
             .remove("connectivity");
     }));
     assert!(!rejects(
-        &|v| v["steps"][3]["config"]["region"] = json!(["floor", "wall"])
+        &|v| v["steps"][4]["config"]["region"] = json!(["floor", "wall"])
     ));
 }

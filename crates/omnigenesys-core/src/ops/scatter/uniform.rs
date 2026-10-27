@@ -61,10 +61,9 @@ impl Operator for Scatter {
         let region = grid.region();
         // Candidates first (the conditions see the map as the step found
         // it), then the draw only where a candidate is.
-        let candidates = match &self.when {
-            Some(c) => grid.prepare(c)?.eval(region),
-            None => CellMask::full(region),
-        };
+        let candidates = grid
+            .mask(self.when.as_ref())?
+            .unwrap_or_else(|| CellMask::full(region));
         let layer = grid.tiles_mut(self.layer)?;
         for c in candidates.iter_ones() {
             if self.chance.hit(rng.at(c)[0]) {

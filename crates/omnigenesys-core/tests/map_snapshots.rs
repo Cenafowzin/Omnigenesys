@@ -191,6 +191,16 @@ fn classic_dungeon() {
     ));
 }
 
+/// White noise smoothed, a border, only the largest open area, made again
+/// while it is too small: tests/pipelines/caverna.json.
+#[test]
+fn cave_recipe() {
+    insta::assert_snapshot!(terrain_of(
+        include_str!("pipelines/caverna.json"),
+        DUNGEON_GLYPHS
+    ));
+}
+
 /// Noise, falloff and bands: tests/pipelines/ilha.json.
 #[test]
 fn island_from_noise() {

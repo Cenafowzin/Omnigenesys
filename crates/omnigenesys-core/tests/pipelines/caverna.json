@@ -1,0 +1,161 @@
+{
+  "version": 2,
+  "description": "Caverna: ruído branco alisado por autômato celular, borda sólida, só a maior área aberta; refeita se ela ficar pequena.",
+  "seed": 512,
+  "size": {
+    "width": 96,
+    "height": 64
+  },
+  "attempts": 20,
+  "layers": [
+    "terreno",
+    {
+      "name": "tamanho",
+      "kind": "scalar"
+    },
+    {
+      "name": "posicao",
+      "kind": "scalar"
+    }
+  ],
+  "tiles": [
+    "chao",
+    "parede"
+  ],
+  "params": {
+    "chance_parede": {
+      "type": "number",
+      "default": 0.45,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "description": "Quanto do ruído inicial é parede: mais parede, cavernas mais fechadas"
+    },
+    "passadas": {
+      "type": "integer",
+      "default": 5,
+      "min": 1,
+      "max": 20,
+      "description": "Quantas vezes o autômato alisa o ruído"
+    },
+    "tamanho_minimo": {
+      "type": "integer",
+      "default": 300,
+      "min": 1,
+      "max": 6144,
+      "description": "Células que a maior área aberta precisa ter; menos que isso, o mapa é refeito"
+    }
+  },
+  "steps": [
+    {
+      "id": "base",
+      "operator": "Fill",
+      "description": "Tudo começa chão.",
+      "config": {
+        "layer": "terreno",
+        "tile": "chao"
+      }
+    },
+    {
+      "id": "ruido",
+      "operator": "Scatter",
+      "description": "Cada célula vira parede com a chance do param: ruído branco.",
+      "config": {
+        "layer": "terreno",
+        "tile": "parede",
+        "chance": {
+          "$param": "chance_parede"
+        }
+      }
+    },
+    {
+      "id": "alisa",
+      "operator": "CellularAutomaton",
+      "description": "Regra 4-5: chão com 5 ou mais paredes em volta vira parede; parede com 4 ou mais continua. Fora do mapa conta como parede.",
+      "config": {
+        "layer": "terreno",
+        "alive": "parede",
+        "dead": "chao",
+        "birth": [
+          5,
+          6,
+          7,
+          8
+        ],
+        "survive": [
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "iterations": {
+          "$param": "passadas"
+        },
+        "outside": "alive"
+      }
+    },
+    {
+      "id": "borda",
+      "operator": "Fill",
+      "description": "O anel de fora do mapa é parede.",
+      "config": {
+        "layer": "terreno",
+        "tile": "parede"
+      },
+      "conditions": [
+        {
+          "type": "edge_distance",
+          "max": 0
+        }
+      ]
+    },
+    {
+      "id": "areas",
+      "operator": "RegionSize",
+      "description": "Tamanho e posição no ranking (1 = a maior) de cada área aberta.",
+      "config": {
+        "from": "terreno",
+        "region": "chao",
+        "connectivity": "orthogonal",
+        "layer": "tamanho",
+        "rank": "posicao"
+      }
+    },
+    {
+      "id": "grande_o_bastante",
+      "operator": "Check",
+      "description": "A maior área precisa do tamanho mínimo; se não, o mapa é refeito (até `attempts` vezes).",
+      "config": {
+        "min": {
+          "$param": "tamanho_minimo"
+        },
+        "message": "a maior área aberta ficou pequena"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "posicao",
+          "min": 1,
+          "max": 2
+        }
+      ]
+    },
+    {
+      "id": "uma_caverna",
+      "operator": "Fill",
+      "description": "Toda área aberta que não é a maior vira parede.",
+      "config": {
+        "layer": "terreno",
+        "tile": "parede"
+      },
+      "conditions": [
+        {
+          "type": "scalar_in_range",
+          "layer": "posicao",
+          "min": 2
+        }
+      ]
+    }
+  ]
+}

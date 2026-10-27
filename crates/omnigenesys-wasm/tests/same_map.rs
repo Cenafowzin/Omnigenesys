@@ -12,6 +12,7 @@ use wasm_bindgen_test::wasm_bindgen_test;
 
 const ISLAND: &str = include_str!("../../omnigenesys-core/tests/pipelines/island.json");
 const CAVE: &str = include_str!("../../omnigenesys-core/tests/pipelines/cave.json");
+const CAVERNA: &str = include_str!("../../omnigenesys-core/tests/pipelines/caverna.json");
 // Noise: floating point, the part most likely to drift between targets.
 // The file includes every height as written (f32, shortest decimal).
 const ISLAND_NOISE: &str = include_str!("../../omnigenesys-core/tests/pipelines/ilha.json");
@@ -72,7 +73,13 @@ fn island() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn cave() {
-    assert_eq!(fingerprint(CAVE), 9_229_285_801_968_616_189);
+    assert_eq!(fingerprint(CAVE), 13_610_475_303_326_337_056);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn cave_recipe() {
+    assert_eq!(fingerprint(CAVERNA), 7_856_562_658_279_331_004);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
