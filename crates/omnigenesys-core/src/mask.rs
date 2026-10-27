@@ -63,16 +63,59 @@ impl CellMask {
         let (y0, y1) = (lo(map.origin.y), hi(map.origin.y, map.size.height));
         let (z0, z1) = (lo(map.origin.z), hi(map.origin.z, map.size.depth));
         let flat = map.size.depth <= 1;
-        let mut w = MaskWriter::new(region);
-        for c in region.iter() {
-            let (x, y, z) = (i64::from(c.x), i64::from(c.y), i64::from(c.z));
-            let mut d = (x - x0).min(x1 - x).min(y - y0).min(y1 - y);
-            if !flat {
-                d = d.min(z - z0).min(z1 - z);
+        let (min, max) = (i64::from(min), i64::from(max));
+        let (rx0, width) = (lo(region.origin.x), region.size.width as usize);
+        let rx1 = rx0 + width as i64 - 1;
+        let mut mask = CellMask::new(region);
+        // A row at distance `dr` from the edges in y (and z) holds where
+        // `min <= min(dx, dr) <= max`, `dx` being the distance in x: no
+        // cell if `dr < min`; else the cells with `dx >= min`, all of them
+        // if `dr <= max`, and otherwise only those with `dx <= max` too, at
+        // both ends. At most two runs a row, written a word at a time.
+        let mut row = 0;
+        for k in 0..region.size.depth {
+            let z = lo(region.origin.z) + i64::from(k);
+            for j in 0..region.size.height {
+                let y = lo(region.origin.y) + i64::from(j);
+                let mut dr = (y - y0).min(y1 - y);
+                if !flat {
+                    dr = dr.min(z - z0).min(z1 - z);
+                }
+                if dr >= min {
+                    let runs = if dr <= max {
+                        [(x0 + min, x1 - min), (1, 0)]
+                    } else {
+                        [(x0 + min, x0 + max), (x1 - max, x1 - min)]
+                    };
+                    for (a, b) in runs {
+                        let (a, b) = (a.max(rx0), b.min(rx1));
+                        if a <= b {
+                            let start = row * width + (a - rx0) as usize;
+                            mask.set_run(start, (b - a + 1) as usize);
+                        }
+                    }
+                }
+                row += 1;
             }
-            w.push(d >= i64::from(min) && d <= i64::from(max));
         }
-        w.finish()
+        mask
+    }
+
+    /// Sets the `len` bits from bit `start`.
+    fn set_run(&mut self, start: usize, len: usize) {
+        let end = start + len;
+        let mut i = start;
+        while i < end {
+            let (word, bit) = (i >> 6, i & 63);
+            let n = (64 - bit).min(end - i);
+            let ones = if n == 64 {
+                u64::MAX
+            } else {
+                ((1u64 << n) - 1) << bit
+            };
+            self.words[word] |= ones;
+            i += n;
+        }
     }
 
     pub fn bounds(&self) -> Bounds {

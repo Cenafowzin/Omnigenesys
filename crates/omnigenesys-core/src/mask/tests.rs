@@ -219,3 +219,61 @@ fn iter_ones_matches_a_scan_on_any_shape_and_density() {
         }
     }
 }
+
+/// The distance to the nearest edge of `map`, cell by cell: what
+/// `from_edge_distance` writes a row at a time.
+fn naive_edge(region: Bounds, map: Bounds, min: u32, max: u32) -> CellMask {
+    let flat = map.size.depth <= 1;
+    let mut w = MaskWriter::new(region);
+    for c in region.iter() {
+        let o = map.origin;
+        let far = |p: i32, o: i32, n: u32| {
+            (i64::from(p) - i64::from(o)).min(i64::from(o) + i64::from(n) - 1 - i64::from(p))
+        };
+        let mut d = far(c.x, o.x, map.size.width).min(far(c.y, o.y, map.size.height));
+        if !flat {
+            d = d.min(far(c.z, o.z, map.size.depth));
+        }
+        w.push(d >= i64::from(min) && d <= i64::from(max));
+    }
+    w.finish()
+}
+
+#[test]
+fn edge_distance_by_rows_matches_cell_by_cell() {
+    let maps = [
+        Bounds::new(Coord::new(-7, 3, 0), GridSize::new(70, 13, 1)),
+        Bounds::new(Coord::new(0, 0, 0), GridSize::new(1, 1, 1)),
+        Bounds::new(Coord::new(2, -4, -1), GridSize::new(9, 11, 6)),
+    ];
+    let ranges = [
+        (0, 0),
+        (0, 2),
+        (1, 1),
+        (2, 5),
+        (3, u32::MAX),
+        (0, u32::MAX),
+        (40, u32::MAX),
+    ];
+    for map in maps {
+        // The map itself, a chunk inside it, and regions reaching past it
+        // (an `offset` or `neighbours` looks there).
+        let regions = [
+            map,
+            map.expand(2, 3, 1),
+            Bounds::new(
+                Coord::new(map.origin.x + 1, map.origin.y - 2, map.origin.z),
+                GridSize::new(65, 4, map.size.depth),
+            ),
+        ];
+        for region in regions {
+            for (min, max) in ranges {
+                assert_eq!(
+                    CellMask::from_edge_distance(region, map, min, max),
+                    naive_edge(region, map, min, max),
+                    "{map:?} {region:?} {min}..={max}"
+                );
+            }
+        }
+    }
+}
