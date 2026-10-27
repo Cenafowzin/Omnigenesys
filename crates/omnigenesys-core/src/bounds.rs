@@ -47,6 +47,16 @@ impl Bounds {
         }
     }
 
+    /// The middle cell; on an even side, the one after the middle.
+    #[must_use]
+    pub fn centre(self) -> Coord {
+        Coord::new(
+            self.origin.x + (self.size.width / 2) as i32,
+            self.origin.y + (self.size.height / 2) as i32,
+            self.origin.z + (self.size.depth / 2) as i32,
+        )
+    }
+
     pub fn iter(self) -> impl Iterator<Item = Coord> {
         let Bounds { origin, size } = self;
         (0..size.depth).flat_map(move |z| {

@@ -156,9 +156,9 @@ fn offset_reads_past_the_chunk() {
 /// Neighbours counted across chunk borders and at the map's edge, around
 /// a condition that itself reads a step away.
 #[test]
-fn neighbors_read_past_the_chunk() {
+fn neighbours_read_past_the_chunk() {
     agrees(
-        "neighbors",
+        "neighbours",
         &[
             step(
                 "ruido",
@@ -171,7 +171,7 @@ fn neighbors_read_past_the_chunk() {
                 "Fill",
                 json!({"layer": "terreno", "tile": "chao"}),
                 json!([
-                    {"type": "neighbors", "shape": "all", "min": 3, "max": 5,
+                    {"type": "neighbours", "shape": "all", "min": 3, "max": 5,
                         "condition": {"type": "offset", "x": 2, "condition":
                             {"type": "tile_is", "layer": "terreno", "tile": "parede"}}}
                 ]),
@@ -216,7 +216,7 @@ fn noise_and_gradient_use_world_coordinates_and_the_maps_size() {
             step(
                 "encosta",
                 "Curve",
-                json!({"input": "distancia", "layer": "distancia", "invert": true,
+                json!({"from": "distancia", "layer": "distancia", "invert": true,
                        "curve": {"kind": "points", "points": [[0, 0], [0.4, 0.2], [1, 1]]}}),
                 json!([]),
             ),

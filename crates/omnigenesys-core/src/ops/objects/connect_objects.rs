@@ -15,7 +15,7 @@ use crate::{
     rng::Chance,
 };
 
-use super::common::{chance, reads_besides, scene};
+use super::common::{always, chance, reads_besides, scene};
 use super::grow_objects::parent;
 
 /// A graph over objects: one connection object per pair it joins, with
@@ -72,10 +72,6 @@ pub struct ConnectObjectsConfig {
 
 fn connection() -> String {
     "connection".to_string()
-}
-
-fn always() -> f64 {
-    1.0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -158,15 +154,6 @@ impl OperatorType for ConnectObjects {
     }
 }
 
-/// A box's middle cell.
-fn centre(b: Bounds) -> Coord {
-    Coord::new(
-        b.origin.x + (b.size.width / 2) as i32,
-        b.origin.y + (b.size.height / 2) as i32,
-        b.origin.z + (b.size.depth / 2) as i32,
-    )
-}
-
 /// The squared distance between two boxes' middles, in half cells (exact,
 /// so ties are ties).
 fn distance(a: Bounds, b: Bounds) -> i64 {
@@ -208,27 +195,24 @@ impl ConnectObjects {
             Strategy::Neighbours | Strategy::Parent => scene_pairs,
             Strategy::Chain => part.windows(2).map(|w| (w[0], w[1])).collect(),
             Strategy::Mst => {
-                // Prim from the first; ties go to the lower places.
-                let mut tree = Vec::new();
-                let mut inside = vec![false; objects.len()];
-                let Some(&first) = part.first() else {
-                    return tree;
+                // Prim from the first, keeping for each object outside its
+                // shortest edge into the tree: O(n²). Ties go to the lower
+                // places, so the tree is the same whatever the order.
+                let Some((&first, rest)) = part.split_first() else {
+                    return Vec::new();
                 };
-                inside[first] = true;
-                for _ in 1..part.len() {
-                    let mut best: Option<(i64, usize, usize)> = None;
-                    for &a in part.iter().filter(|&&a| inside[a]) {
-                        for &b in part.iter().filter(|&&b| !inside[b]) {
-                            let e = (d(a, b), a.min(b), a.max(b));
-                            if best.is_none_or(|x| e < x) {
-                                best = Some(e);
-                            }
-                        }
-                    }
-                    let (_, a, b) = best.expect("an object is left outside");
-                    let newcomer = if inside[a] { b } else { a };
-                    inside[newcomer] = true;
+                let edge = |a: usize, b: usize| (d(a, b), a.min(b), a.max(b));
+                let mut outside: Vec<(usize, (i64, usize, usize))> =
+                    rest.iter().map(|&b| (b, edge(first, b))).collect();
+                let mut tree = Vec::with_capacity(outside.len());
+                while let Some((k, &(newcomer, (_, a, b)))) =
+                    outside.iter().enumerate().min_by_key(|(_, (_, e))| *e)
+                {
                     tree.push((a, b));
+                    outside.swap_remove(k);
+                    for (o, e) in &mut outside {
+                        *e = (*e).min(edge(newcomer, *o));
+                    }
                 }
                 tree
             }
@@ -292,6 +276,7 @@ impl Operator for ConnectObjects {
         let mut grid = parts.grid;
         let rng = parts.rng;
         let map = grid.map();
+        let filter = grid.prepare_filter(&self.filter)?;
         let mut reads = vec![self.objects];
         reads.extend(
             reads_besides(&self.filter.layers(), &[self.layer])
@@ -303,7 +288,7 @@ impl Operator for ConnectObjects {
         let id = self.objects.layer();
         let objects = scene.objects(id);
         let part: Vec<usize> = (0..objects.len())
-            .filter(|&i| self.filter.test(&scene, id, Subject::Object(i)))
+            .filter(|&i| filter.test(&scene, id, Subject::Object(i)))
             .collect();
         let takes_part = |i: usize| part.binary_search(&i).is_ok();
 
@@ -364,7 +349,7 @@ impl Operator for ConnectObjects {
             made.push(Object {
                 id: split.ids.fresh(),
                 kind: self.kind.clone(),
-                bbox: span(centre(oa.bbox), centre(ob.bbox)),
+                bbox: span(oa.bbox.centre(), ob.bbox.centre()),
                 props: vec![
                     ("from".to_string(), Value::Object(oa.id)),
                     ("to".to_string(), Value::Object(ob.id)),

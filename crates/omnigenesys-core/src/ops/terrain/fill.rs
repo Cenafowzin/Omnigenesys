@@ -46,10 +46,7 @@ impl Operator for Fill {
         let grid = &mut parts.grid;
         // The mask is taken before writing, so conditions on the same layer
         // see the map as it was when the step started.
-        let mask = match &self.when {
-            Some(c) => Some(grid.prepare(c)?.eval(grid.region())),
-            None => None,
-        };
+        let mask = grid.mask(self.when.as_ref())?;
         let layer = grid.tiles_mut(self.layer)?;
         match mask {
             None => layer.cells_mut().for_each(|t| *t = self.tile),

@@ -151,7 +151,7 @@
                 "part": "wall"
               },
               {
-                "type": "neighbors",
+                "type": "neighbours",
                 "max": 0,
                 "condition": {
                   "type": "in_object",
@@ -170,7 +170,7 @@
                 "part": "wall"
               },
               {
-                "type": "neighbors",
+                "type": "neighbours",
                 "min": 1,
                 "condition": {
                   "type": "all",

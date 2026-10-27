@@ -50,7 +50,7 @@
       "operator": "Curve",
       "description": "Eleva a distância ao quadrado e inverte: 1 no centro, caindo devagar perto do meio e depressa perto da borda.",
       "config": {
-        "input": "distancia",
+        "from": "distancia",
         "layer": "distancia",
         "curve": {
           "kind": "power",

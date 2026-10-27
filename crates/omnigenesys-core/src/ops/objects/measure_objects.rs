@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::{
     access::{ReadHandle, WriteHandle},
-    filter::{CompiledFilter, ObjectFilter, Scene, Subject},
+    filter::{CompiledFilter, ObjectFilter, PreparedFilter, Scene, Subject},
     grid::LayerId,
     object::{ObjectId, Value},
     operator::{
@@ -143,7 +143,7 @@ impl MeasureObjects {
         &self,
         scene: &Scene,
         id: LayerId,
-        from: &CompiledFilter,
+        from: &PreparedFilter<'_>,
         via: Option<LayerId>,
     ) -> Vec<Option<u32>> {
         let objects = scene.objects(id);
@@ -194,6 +194,13 @@ impl Operator for MeasureObjects {
         let map = grid.map();
         let id = self.layer.layer();
 
+        let filter = grid.prepare_filter(&self.filter)?;
+        // The measure's own filter, if it has one.
+        let inner = match &self.measure {
+            Compiled::Distance { from, .. } => Some(grid.prepare_filter(from)?),
+            Compiled::Neighbours { filter } => Some(grid.prepare_filter(filter)?),
+            Compiled::Degree { .. } => None,
+        };
         let mut layers = self.filter.layers();
         match &self.measure {
             Compiled::Distance {
@@ -212,12 +219,13 @@ impl Operator for MeasureObjects {
 
         let values: Vec<Option<Value>> = match &self.measure {
             Compiled::Distance {
-                from,
                 connections,
                 fraction,
+                ..
             } => {
+                let from = inner.as_ref().expect("prepared above");
                 let hops = self.hops(&scene, id, from, connections.map(|h| h.layer()));
-                let measured = |i: usize| self.filter.test(&scene, id, Subject::Object(i));
+                let measured = |i: usize| filter.test(&scene, id, Subject::Object(i));
                 if *fraction {
                     let most = (0..n)
                         .filter(|&i| measured(i))
@@ -255,18 +263,19 @@ impl Operator for MeasureObjects {
                     })
                     .collect()
             }
-            Compiled::Neighbours { filter } => (0..n)
+            Compiled::Neighbours { .. } => (0..n)
                 .map(|i| {
+                    let around = inner.as_ref().expect("prepared above");
                     let k = scene
                         .neighbours(id, Subject::Object(i))
-                        .filter(|&j| filter.test(&scene, id, Subject::Object(j)))
+                        .filter(|&j| around.test(&scene, id, Subject::Object(j)))
                         .count();
                     Some(Value::Int(k as i64))
                 })
                 .collect(),
         };
         let measured: Vec<bool> = (0..n)
-            .map(|i| self.filter.test(&scene, id, Subject::Object(i)))
+            .map(|i| filter.test(&scene, id, Subject::Object(i)))
             .collect();
         let layer = split.writes[0]
             .as_objects_mut()

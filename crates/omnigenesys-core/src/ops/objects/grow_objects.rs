@@ -201,6 +201,10 @@ impl Operator for GrowObjects {
         let map = grid.map();
         let n = self.amount.draw(rng);
 
+        let (from, filter) = (
+            grid.prepare_filter(&self.from)?,
+            grid.prepare_filter(&self.filter)?,
+        );
         let mut layers = self.from.layers();
         layers.extend(self.filter.layers());
         let reads = reads_besides(&layers, &[self.layer]);
@@ -211,7 +215,7 @@ impl Operator for GrowObjects {
 
         let seeds = |scene: &Scene| -> Vec<usize> {
             (0..scene.objects(id).len())
-                .filter(|&i| self.from.test(scene, id, Subject::Object(i)))
+                .filter(|&i| from.test(scene, id, Subject::Object(i)))
                 .collect()
         };
         let mut frontier = seeds(&scene);
@@ -220,7 +224,7 @@ impl Operator for GrowObjects {
         // grows nothing would loop forever.
         let mut since_reseed = 0;
         let takes = |scene: &Scene, s: usize| {
-            scene.in_slot(id, s).is_none() && self.filter.test(scene, id, Subject::Slot(s))
+            scene.in_slot(id, s).is_none() && filter.test(scene, id, Subject::Slot(s))
         };
 
         while (grown.len() as u32) < n {

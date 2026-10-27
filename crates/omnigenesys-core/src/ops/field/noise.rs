@@ -126,10 +126,9 @@ impl Operator for Noise {
         // field's seed, not a per-cell choice.
         let seed = parts.rng.next_u64() as i64;
         let region = grid.region();
-        let mask = match &self.when {
-            Some(c) => grid.prepare(c)?.eval(region),
-            None => CellMask::full(region),
-        };
+        let mask = grid
+            .mask(self.when.as_ref())?
+            .unwrap_or_else(|| CellMask::full(region));
         let layer = grid.scalars_mut(self.layer)?;
         let f = self.frequency;
         for c in mask.iter_ones() {

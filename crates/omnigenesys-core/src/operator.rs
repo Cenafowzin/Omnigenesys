@@ -15,9 +15,10 @@ use crate::{
     access::{Access, Reach, ReadHandle, WriteHandle},
     bounds::Bounds,
     condition::{CompiledCondition, Condition, ConditionError, PreparedCondition},
-    filter::{CompiledFilter, FilterError, ObjectFilter},
+    filter::{CompiledFilter, FilterError, ObjectFilter, PreparedFilter},
     grid::{Grid, GridError, LayerId, Split},
     layer::{Layer, LayerKind, OutOfBounds},
+    mask::CellMask,
     object::ObjectLayer,
     rng::StepRng,
     tile::{TileError, TileId, TileRegistry},
@@ -375,16 +376,21 @@ impl<'a> BuildContext<'a> {
         layer: LayerId,
     ) -> Result<CompiledFilter, BuildError> {
         let compiled =
-            CompiledFilter::compile(filters, self.grid, layer).map_err(|error| match error {
-                // Kept as it is, so a missing layer is reported once per file.
-                FilterError::Grid(e) => BuildError::Grid(e),
-                error => BuildError::Filter {
-                    field: field.to_string(),
-                    error,
-                },
+            CompiledFilter::compile(filters, self.grid, self.tiles, layer).map_err(|error| {
+                match error {
+                    // Kept as it is, so a missing layer is reported once per file.
+                    FilterError::Grid(e) => BuildError::Grid(e),
+                    error => BuildError::Filter {
+                        field: field.to_string(),
+                        error,
+                    },
+                }
             })?;
         for l in compiled.layers() {
             self.access.add_read(l, Reach::ZERO);
+        }
+        for c in compiled.conditions() {
+            self.record_condition(c);
         }
         Ok(compiled)
     }
@@ -583,6 +589,20 @@ impl GridView<'_> {
     /// A snapshot of what the condition reads, taken now.
     pub fn prepare(&self, c: &CompiledCondition) -> Result<PreparedCondition, OpError> {
         Ok(c.prepare(self.grid)?)
+    }
+
+    /// The filter, with the cells its `cells` filters look at taken now:
+    /// before the step writes, as the step's conditions.
+    pub fn prepare_filter<'f>(&self, f: &'f CompiledFilter) -> Result<PreparedFilter<'f>, OpError> {
+        Ok(f.prepare(self.grid)?)
+    }
+
+    /// Where the step's conditions hold in the region, taken now — before
+    /// the step writes, so conditions on the layer it writes see it as it
+    /// was. `None` when the step has none: every cell.
+    pub fn mask(&self, when: Option<&CompiledCondition>) -> Result<Option<CellMask>, OpError> {
+        when.map(|c| Ok(self.prepare(c)?.eval(self.region())))
+            .transpose()
     }
 }
 

@@ -24,8 +24,8 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct CurveConfig {
     /// The scalar layer read.
-    pub input: String,
-    /// The scalar layer written; may be `input`.
+    pub from: String,
+    /// The scalar layer written; may be `from`.
     pub layer: String,
     pub curve: CurveKind,
     /// `1 − value`, after the curve.
@@ -94,7 +94,7 @@ fn half() -> f64 {
 }
 
 pub struct Curve {
-    input: ReadHandle,
+    from: ReadHandle,
     out: WriteHandle,
     shape: Shape,
     invert: bool,
@@ -298,7 +298,7 @@ impl OperatorType for Curve {
     fn build(c: CurveConfig, bcx: &mut BuildContext<'_>) -> Result<Curve, BuildError> {
         Ok(Curve {
             shape: Shape::new(c.curve)?,
-            input: bcx.read_scalar(&c.input, Reach::ZERO)?,
+            from: bcx.read_scalar(&c.from, Reach::ZERO)?,
             out: bcx.write_scalar(&c.layer)?,
             invert: c.invert,
             when: bcx.step_conditions(),
@@ -311,15 +311,26 @@ impl Operator for Curve {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = match &self.when {
-            Some(c) => grid.prepare(c)?.eval(region),
-            None => CellMask::full(region),
+        let mask = grid
+            .mask(self.when.as_ref())?
+            .unwrap_or_else(|| CellMask::full(region));
+        // When `from` is the output it is read from it: each cell is read
+        // before it is written, and no other cell is read.
+        let same = self.from.layer() == self.out.layer();
+        let reads = if same {
+            &[][..]
+        } else {
+            std::slice::from_ref(&self.from)
         };
-        // A copy of the input: the output may be the same layer.
-        let input = grid.scalars(self.input)?.clone();
-        let out = grid.scalars_mut(self.out)?;
+        let mut split = grid.split(reads, &[self.out])?;
+        let from = split
+            .reads
+            .first()
+            .map(|l| l.as_scalar().expect("checked when built"));
+        let out = split.writes[0].as_scalar_mut().expect("checked when built");
         for c in mask.iter_ones() {
-            let x = f64::from(*input.get(c).unwrap_or(&0.0)).clamp(0.0, 1.0);
+            let v = from.map_or_else(|| out.get(c), |l| l.get(c));
+            let x = f64::from(*v.unwrap_or(&0.0)).clamp(0.0, 1.0);
             let y = self.shape.eval(x).clamp(0.0, 1.0);
             out.set(c, (if self.invert { 1.0 - y } else { y }) as f32)?;
         }

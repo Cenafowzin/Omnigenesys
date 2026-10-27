@@ -14,8 +14,8 @@ use crate::{
 };
 
 use super::common::{
-    Amount, Count, Order, OrderKey, always, chance, filters, one, passing, props, reads_besides,
-    scene, too_few,
+    Amount, Count, Order, OrderKey, always, chance, filters, one, passing, prepare_all, props,
+    reads_besides, scene, too_few,
 };
 
 /// Picks objects and sets props on them: the objects that pass `where`
@@ -93,6 +93,8 @@ impl Operator for TagObjects {
         }
         let n = self.amount.draw(rng);
 
+        let filters = prepare_all(&grid, &self.filters)?;
+        let order = self.order.prepare(&grid)?;
         let layers: Vec<_> = self.filters.iter().flat_map(|f| f.layers()).collect();
         let reads = reads_besides(&layers, &[self.layer]);
         let mut split = grid.split(&reads, &[self.layer])?;
@@ -100,8 +102,8 @@ impl Operator for TagObjects {
         let id = self.layer.layer();
 
         let all: Vec<Subject> = (0..scene.objects(id).len()).map(Subject::Object).collect();
-        let mut found = passing(&self.filters, &scene, id, &all);
-        self.order.sort(&scene, id, &mut found, rng)?;
+        let mut found = passing(&filters, &scene, id, &all);
+        order.sort(&scene, id, &mut found, rng)?;
         found.truncate(n as usize);
         let got = found.len() as u32;
         if got < self.amount.min() {

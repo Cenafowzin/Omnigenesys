@@ -17,7 +17,7 @@ use crate::{
 
 use super::common::{
     Amount, Count, CountRange, CountWord, Order, OrderKey, always, chance, filters, one, passing,
-    props, reads_besides, scene, too_few,
+    prepare_all, props, reads_besides, scene, too_few,
 };
 
 /// Puts new objects on a layer, one at a time: the candidates that pass
@@ -269,6 +269,8 @@ impl Operator for PlaceObjects {
         }
         let n = self.amount.draw(rng);
 
+        let filters = prepare_all(&grid, &self.filters)?;
+        let order = self.order.prepare(&grid)?;
         let layers: Vec<_> = self.filters.iter().flat_map(|f| f.layers()).collect();
         let reads = reads_besides(&layers, &[self.layer]);
         let mut split = grid.split(&reads, &[self.layer])?;
@@ -278,8 +280,8 @@ impl Operator for PlaceObjects {
         let mut placed = Vec::new();
         while (placed.len() as u32) < n {
             let all = self.places.candidates(&scene, id, map, rng);
-            let mut found = passing(&self.filters, &scene, id, &all);
-            self.order.sort(&scene, id, &mut found, rng)?;
+            let mut found = passing(&filters, &scene, id, &all);
+            order.sort(&scene, id, &mut found, rng)?;
             let bbox = match (found.first(), self.places) {
                 (Some(&Subject::Slot(slot)), Places::Slots(lattice)) => {
                     let (column, row) = lattice.slot(slot);

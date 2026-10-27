@@ -34,7 +34,7 @@ pub use objects::{
     OnExhausted, OrderKey, PlaceObjects, PlaceObjectsConfig, Retire, Side, Size, TagObjects,
     TagObjectsConfig,
 };
-pub use paths::{CarvePaths, CarvePathsConfig, PathShape};
+pub use paths::{Blocked, CarvePaths, CarvePathsConfig, Cost, CostRule, PathShape};
 pub use scatter::{Scatter, ScatterConfig};
 pub use shape::{
     CellularAutomaton, CellularAutomatonConfig, Connectivity, Outside, RegionSize, RegionSizeConfig,

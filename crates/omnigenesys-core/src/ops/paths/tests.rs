@@ -218,6 +218,47 @@ fn a_later_path_sees_the_earlier_ones() {
     );
 }
 
+/// Rooms A and B in a row, their walls blocked but for a gap in the
+/// facing ones (the wall cells `gap` from the map's edge: rows `gap` of
+/// x 8 and 9). A path 3 wide fits through a gap 3 tall and paints no
+/// blocked cell; through a gap 1 tall it does not fit at all.
+#[test]
+fn a_wide_cheapest_path_fits_through_gaps_as_wide_as_itself() {
+    let wall = json!({"type": "in_object", "layer": "salas", "part": "wall"});
+    let costs = |gap: Json| {
+        json!([
+            {"where": [wall, {"type": "edge_distance", "min": gap["min"], "max": gap["max"]}], "cost": 1},
+            {"where": [wall], "cost": "blocked"}])
+    };
+    let carve3 = |gap: Json| {
+        pipeline(
+            0,
+            carve(json!({"shape": "cheapest", "width": 3, "costs": costs(gap)})),
+            json!([]),
+        )
+    };
+    let rows = run(&carve3(json!({"min": 2, "max": 4}))).unwrap();
+    let open = |x: usize, y: usize| rows[y].as_bytes()[x] == b'#';
+    for x in [8, 9] {
+        let painted: Vec<usize> = (0..7).filter(|&y| open(x, y)).collect();
+        assert_eq!(
+            painted,
+            [2, 3, 4],
+            "x {x}
+{}",
+            rows.join(
+                "
+"
+            )
+        );
+    }
+    let e = run(&carve3(json!({"min": 3, "max": 3}))).unwrap_err();
+    assert!(
+        e.contains("blocked cells cut (4, 3) off from (13, 3)"),
+        "{e}"
+    );
+}
+
 #[test]
 fn cheapest_fails_when_blocked_cells_cut_the_ends_apart() {
     // Rooms that touch only at a corner, and nothing outside them walkable.

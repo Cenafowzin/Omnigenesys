@@ -119,10 +119,7 @@ impl Operator for CellularAutomaton {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = match &self.when {
-            Some(c) => Some(grid.prepare(c)?.eval(region)),
-            None => None,
-        };
+        let mask = grid.mask(self.when.as_ref())?;
         let layer = grid.tiles_mut(self.layer)?;
         let (width, height) = (region.size.width as usize, region.size.height as usize);
         if width == 0 || height == 0 {

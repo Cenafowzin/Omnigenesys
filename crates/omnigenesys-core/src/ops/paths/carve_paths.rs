@@ -34,7 +34,11 @@ use crate::{
 ///   next one sees it: a cheap rule on the path's tile makes paths share
 ///   corridors (vazgriz), an expensive one on walls makes a path cross a
 ///   wall once instead of running along it — pesquisa
-///   2026-10-26-portas-e-astar.
+///   2026-10-26-portas-e-astar. A path wider than 1 is planned for its
+///   middle line, and a cell costs the most of any under the brush there:
+///   the path fits through no gap narrower than itself, and never paints
+///   a blocked cell (the obstacles grown by the walker's size, as in
+///   configuration space).
 ///
 /// A path crosses whatever is in the way, rooms too: a wall it goes
 /// through is where a door goes (`Fill` with `in_object {wall}` and the
@@ -183,15 +187,6 @@ impl OperatorType for CarvePaths {
     }
 }
 
-/// A box's middle cell.
-fn centre(b: Bounds) -> Coord {
-    Coord::new(
-        b.origin.x + (b.size.width / 2) as i32,
-        b.origin.y + (b.size.height / 2) as i32,
-        b.origin.z,
-    )
-}
-
 /// The cells from `from` to `to` along one axis, both ends included.
 fn line(cells: &mut Vec<Coord>, from: Coord, to: Coord) {
     let (dx, dy) = ((to.x - from.x).signum(), (to.y - from.y).signum());
@@ -204,8 +199,14 @@ fn line(cells: &mut Vec<Coord>, from: Coord, to: Coord) {
 }
 
 impl CarvePaths {
-    /// The cells of a path from `a` to `b`.
-    fn path(&self, a: Coord, b: Coord, rng: &mut StepRng) -> Vec<Coord> {
+    /// The cells of a path from `a` to `b`, on the grid as it is now.
+    fn path(
+        &self,
+        grid: &GridView<'_>,
+        a: Coord,
+        b: Coord,
+        rng: &mut StepRng,
+    ) -> Result<Option<Vec<Coord>>, OpError> {
         let mut cells = Vec::new();
         match self.shape {
             Shape::L => {
@@ -234,9 +235,12 @@ impl CarvePaths {
                     line(&mut cells, Coord::new(b.x, t, a.z), b);
                 }
             }
-            Shape::Cheapest => unreachable!("walked over the costs, in `execute`"),
+            Shape::Cheapest => {
+                let cost = self.costs(grid)?;
+                return Ok(cheapest_path(grid.region(), &cost, self.turn, a, b));
+            }
         }
-        cells
+        Ok(Some(cells))
     }
 
     /// What walking into each cell of the region costs, from the rules, on
@@ -254,7 +258,41 @@ impl CarvePaths {
             }
         }
         cost.iter_mut().filter(|c| **c == 0).for_each(|c| *c = 1);
-        Ok(cost)
+        Ok(self.widen(cost, region))
+    }
+
+    /// Each cell's cost as the dearest under the brush centred there (the
+    /// cells of the region it covers): rows, then columns, as the brush is
+    /// a square.
+    fn widen(&self, cost: Vec<u32>, region: Bounds) -> Vec<u32> {
+        if self.width == 1 {
+            return cost;
+        }
+        let (w, h) = (region.size.width as usize, region.size.height as usize);
+        let lo = -(self.width as i32 - 1) / 2;
+        let hi = lo + self.width as i32 - 1;
+        let dearest = |src: &[u32], along_x: bool| -> Vec<u32> {
+            let mut out = vec![0; src.len()];
+            for y in 0..h {
+                for x in 0..w {
+                    let (at, len) = if along_x { (x, w) } else { (y, h) };
+                    let from = (at as i32 + lo).max(0) as usize;
+                    let to = (at as i32 + hi).min(len as i32 - 1) as usize;
+                    out[y * w + x] = (from..=to)
+                        .map(|j| {
+                            if along_x {
+                                src[y * w + j]
+                            } else {
+                                src[j * w + x]
+                            }
+                        })
+                        .max()
+                        .unwrap_or(0);
+                }
+            }
+            out
+        };
+        dearest(&dearest(&cost, true), false)
     }
 
     /// Writes the tile over `cells`, `width` across, where `mask` lets it.
@@ -291,10 +329,8 @@ impl Operator for CarvePaths {
         let map = grid.map();
         // Taken before writing, as in `Fill`: conditions on the same layer
         // see it as it was when the step started.
-        let mask = match &self.when {
-            Some(c) => Some(grid.prepare(c)?.eval(grid.region())),
-            None => None,
-        };
+        let mask = grid.mask(self.when.as_ref())?;
+        let filter = grid.prepare_filter(&self.filter)?;
         let mut reads = vec![self.connections, self.objects];
         for l in self.filter.layers() {
             if reads.iter().all(|r| r.layer() != l) {
@@ -327,11 +363,11 @@ impl Operator for CarvePaths {
                         c.id
                     ),
                 })?;
-            Ok(centre(o.bbox))
+            Ok(o.bbox.centre())
         };
         let mut ends = Vec::new();
         for (i, c) in scene.objects(id).iter().enumerate() {
-            if !self.filter.test(&scene, id, Subject::Object(i)) {
+            if !filter.test(&scene, id, Subject::Object(i)) {
                 continue;
             }
             ends.push((c.id, end(c, "from")?, end(c, "to")?));
@@ -339,19 +375,14 @@ impl Operator for CarvePaths {
         drop(split);
 
         for (id, a, b) in ends {
-            let cells = if self.shape == Shape::Cheapest {
-                let cost = self.costs(&grid)?;
-                cheapest_path(grid.region(), &cost, self.turn, a, b).ok_or_else(|| {
-                    OpError::Failed {
-                        message: format!(
-                            "connection {id:?}: blocked cells cut ({}, {}) off from ({}, {})",
-                            a.x, a.y, b.x, b.y
-                        ),
-                    }
-                })?
-            } else {
-                self.path(a, b, rng)
-            };
+            let cells = self
+                .path(&grid, a, b, rng)?
+                .ok_or_else(|| OpError::Failed {
+                    message: format!(
+                        "connection {id:?}: blocked cells cut ({}, {}) off from ({}, {})",
+                        a.x, a.y, b.x, b.y
+                    ),
+                })?;
             self.brush(&mut grid, &cells, mask.as_ref())?;
         }
         Ok(())

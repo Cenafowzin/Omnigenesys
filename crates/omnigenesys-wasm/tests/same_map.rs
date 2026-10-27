@@ -84,7 +84,7 @@ fn volume() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn island_from_noise() {
-    assert_eq!(fingerprint(ISLAND_NOISE), 10_504_992_141_109_169_214);
+    assert_eq!(fingerprint(ISLAND_NOISE), 11_448_320_793_511_970_177);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]

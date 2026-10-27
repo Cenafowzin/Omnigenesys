@@ -10,10 +10,10 @@ use serde::Deserialize;
 use crate::{
     access::{ReadHandle, WriteHandle},
     expr::{self, Expr, Type},
-    filter::{CompiledFilter, ObjectFilter, Scalar, Scene, Subject},
+    filter::{CompiledFilter, ObjectFilter, PreparedFilter, Scalar, Scene, Subject},
     grid::{LayerId, Split},
     object::Value,
-    operator::{BuildContext, BuildError, OpError},
+    operator::{BuildContext, BuildError, GridView, OpError},
     rng::{Chance, StepRng, pick},
 };
 
@@ -194,6 +194,32 @@ impl Order {
         Ok(Order { keys: out })
     }
 
+    /// The order with the filters of its keys prepared, when the step
+    /// starts.
+    pub(super) fn prepare(&self, grid: &GridView<'_>) -> Result<Sorting<'_>, OpError> {
+        let filters = self
+            .keys
+            .iter()
+            .map(|(k, _)| match k {
+                Key::Neighbours(f) => grid.prepare_filter(f).map(Some),
+                _ => Ok(None),
+            })
+            .collect::<Result<_, OpError>>()?;
+        Ok(Sorting {
+            keys: &self.keys,
+            filters,
+        })
+    }
+}
+
+/// An [`Order`] ready to sort: the filters of its keys prepared.
+pub(super) struct Sorting<'o> {
+    keys: &'o [(Key, bool)],
+    /// For each key, its filter if it has one.
+    filters: Vec<Option<PreparedFilter<'o>>>,
+}
+
+impl Sorting<'_> {
     /// Sorts `candidates` of `layer`. Random numbers are drawn candidate
     /// by candidate, key by key, in the candidates' order.
     pub(super) fn sort(
@@ -209,14 +235,14 @@ impl Order {
         let mut keyed = Vec::with_capacity(candidates.len());
         for &c in candidates.iter() {
             let mut values = Vec::with_capacity(self.keys.len());
-            for (key, _) in &self.keys {
-                values.push(self.value(key, scene, layer, c, rng)?);
+            for (k, (key, _)) in self.keys.iter().enumerate() {
+                values.push(self.value(key, self.filters[k].as_ref(), scene, layer, c, rng)?);
             }
             keyed.push((values, c));
         }
         // Stable: the last ties keep the candidates' order.
         keyed.sort_by(|(a, _), (b, _)| {
-            for ((x, y), (_, desc)) in a.iter().zip(b).zip(&self.keys) {
+            for ((x, y), (_, desc)) in a.iter().zip(b).zip(self.keys) {
                 let o = match (x, y) {
                     (Some(x), Some(y)) if *desc => y.total_cmp(x),
                     (Some(x), Some(y)) => x.total_cmp(y),
@@ -237,12 +263,13 @@ impl Order {
     fn value(
         &self,
         key: &Key,
+        filter: Option<&PreparedFilter<'_>>,
         scene: &Scene,
         layer: LayerId,
         c: Subject,
         rng: &mut StepRng,
     ) -> Result<Option<f64>, OpError> {
-        let neighbours = |filter: Option<&CompiledFilter>| {
+        let neighbours = |filter: Option<&PreparedFilter<'_>>| {
             scene
                 .neighbours(layer, c)
                 .filter(|&j| filter.is_none_or(|f| f.test(scene, layer, Subject::Object(j))))
@@ -256,7 +283,7 @@ impl Order {
                     .and_then(crate::filter::number),
                 Subject::Slot(_) | Subject::Box(_) => None,
             },
-            Key::Neighbours(f) => Some(neighbours(Some(f)) as f64),
+            Key::Neighbours(_) => Some(neighbours(filter) as f64),
             Key::Score { expr, random } => {
                 let n = neighbours(None) as i64;
                 let r = if *random { unit(rng.next_u32()) } else { 0.0 };
@@ -318,7 +345,7 @@ pub(super) fn reads_besides(layers: &[LayerId], writes: &[WriteHandle]) -> Vec<R
 /// it: `where`, then each `fallback` in order (pesquisa 2026-10-25, item
 /// 8: Gungeon's secret room goes in a dead end, or anywhere).
 pub(super) fn passing(
-    filters: &[CompiledFilter],
+    filters: &[PreparedFilter<'_>],
     scene: &Scene,
     layer: LayerId,
     all: &[Subject],
@@ -334,6 +361,14 @@ pub(super) fn passing(
         }
     }
     Vec::new()
+}
+
+/// Each filter prepared, when the step starts.
+pub(super) fn prepare_all<'f>(
+    grid: &GridView<'_>,
+    filters: &'f [CompiledFilter],
+) -> Result<Vec<PreparedFilter<'f>>, OpError> {
+    filters.iter().map(|f| grid.prepare_filter(f)).collect()
 }
 
 /// `where` and the fallbacks after it.

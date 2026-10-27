@@ -9,6 +9,11 @@
 //! props, and filters read props. What does change while a step places
 //! objects — how many objects are around a slot — is a filter
 //! (`neighbours`), so each pick sees the picks before it.
+//!
+//! As conditions, filters run in two phases: compiled once per step
+//! ([`CompiledFilter`]), then prepared when the step starts
+//! ([`PreparedFilter`]), which works out the cells a `cells` filter looks
+//! at. Only a prepared filter tests, so no step can forget the cells.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,9 +21,12 @@ use thiserror::Error;
 
 use crate::{
     bounds::Bounds,
+    condition::{CompiledCondition, Condition, ConditionError},
     grid::{Grid, GridError, LayerId},
     layer::LayerKind,
+    mask::CellMask,
     object::{Lattice, Object, ObjectLayer, Value},
+    tile::TileRegistry,
 };
 
 /// One name or several.
@@ -163,6 +171,22 @@ pub enum ObjectFilter {
         #[serde(rename = "where", default)]
         filter: Vec<ObjectFilter>,
     },
+    /// How much of its box lies on cells where `condition` holds, as a
+    /// share of the box's cells from `min` to `max` (both counted, 0 to 1):
+    /// a house all on grass is `min: 1`, a tree off the water `max: 0`, a
+    /// camp mostly in the forest `min: 0.6`. For an empty slot or a place
+    /// drawn for a new object, the cells it would cover. The cells as they
+    /// were when the step started; past the map's edge a cell does not
+    /// hold. Not inside a condition's `in_object` (there a step decides
+    /// a chunk at a time, and a box can reach past it): tag the objects
+    /// with `TagObjects` first, and pick them by the tag.
+    Cells {
+        condition: Box<Condition>,
+        #[serde(default)]
+        min: Option<f64>,
+        #[serde(default)]
+        max: Option<f64>,
+    },
     Any {
         filters: Vec<ObjectFilter>,
     },
@@ -189,6 +213,15 @@ pub enum FilterError {
     NoValues,
     #[error("`any` needs at least one filter")]
     EmptyAny,
+    #[error("cells: {0}")]
+    Condition(Box<ConditionError>),
+    #[error("cells: `{bound}` is {value}, not between 0 and 1 (a share of the box)")]
+    ShareOutOfRange { bound: &'static str, value: f64 },
+    #[error(
+        "`cells` cannot be in a condition's `in_object`: tag the objects with TagObjects, \
+         and pick them by the tag"
+    )]
+    CellsInCondition,
 }
 
 /// Filters resolved against a grid: layer names became ids, ranges were
@@ -196,6 +229,16 @@ pub enum FilterError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledFilter {
     all: Vec<F>,
+    /// The conditions of its `cells` filters; `F::Cells` holds a place here.
+    cells: Vec<CompiledCondition>,
+}
+
+/// A [`CompiledFilter`] with the cells its `cells` filters look at worked
+/// out, on the grid as it was then. What tests.
+#[derive(Debug, Clone)]
+pub struct PreparedFilter<'f> {
+    all: &'f [F],
+    cells: Vec<CellMask>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -224,6 +267,11 @@ enum F {
         layer: LayerId,
         filter: Vec<F>,
     },
+    Cells {
+        condition: usize,
+        min: f64,
+        max: f64,
+    },
     Any(Vec<F>),
     Not(Box<F>),
 }
@@ -233,10 +281,37 @@ impl CompiledFilter {
     pub fn compile(
         filters: &[ObjectFilter],
         grid: &Grid,
+        tiles: &TileRegistry,
         layer: LayerId,
     ) -> Result<CompiledFilter, FilterError> {
+        let mut c = Compiler {
+            grid,
+            tiles,
+            cells: Vec::new(),
+        };
+        let all = c.all(filters, layer)?;
         Ok(CompiledFilter {
-            all: compile_all(filters, grid, layer)?,
+            all,
+            cells: c.cells,
+        })
+    }
+
+    /// The conditions its `cells` filters test, for the step to declare
+    /// what they read.
+    pub fn conditions(&self) -> &[CompiledCondition] {
+        &self.cells
+    }
+
+    /// Works out the cells of its `cells` filters on `grid` as it is now.
+    pub fn prepare(&self, grid: &Grid) -> Result<PreparedFilter<'_>, ConditionError> {
+        let cells = self
+            .cells
+            .iter()
+            .map(|c| Ok(c.prepare(grid)?.eval(grid.bounds())))
+            .collect::<Result<_, ConditionError>>()?;
+        Ok(PreparedFilter {
+            all: &self.all,
+            cells,
         })
     }
 
@@ -251,10 +326,14 @@ impl CompiledFilter {
         layers(&self.all, &mut out);
         out
     }
+}
 
+impl PreparedFilter<'_> {
     /// Whether `subject`, of `layer`, passes.
     pub fn test(&self, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
-        self.all.iter().all(|f| test(f, scene, layer, subject))
+        self.all
+            .iter()
+            .all(|f| test(f, &self.cells, scene, layer, subject))
     }
 }
 
@@ -275,120 +354,162 @@ fn layers(fs: &[F], out: &mut Vec<LayerId>) {
     }
 }
 
-fn compile_all(fs: &[ObjectFilter], grid: &Grid, layer: LayerId) -> Result<Vec<F>, FilterError> {
-    fs.iter().map(|f| compile(f, grid, layer)).collect()
+struct Compiler<'a> {
+    grid: &'a Grid,
+    tiles: &'a TileRegistry,
+    cells: Vec<CompiledCondition>,
 }
 
-fn compile(f: &ObjectFilter, grid: &Grid, layer: LayerId) -> Result<F, FilterError> {
-    Ok(match f {
-        ObjectFilter::KindIs { kind } => F::Kind(kind.names().to_vec()),
-        ObjectFilter::PropIs { name, value } => {
-            let values = value.values();
-            if values.is_empty() {
-                return Err(FilterError::NoValues);
-            }
-            F::PropIs(name.clone(), values)
-        }
-        ObjectFilter::HasProp { name } => F::HasProp(name.clone()),
-        ObjectFilter::PropInRange { name, min, max } => {
-            let (min, max) = match (*min, *max) {
-                (None, None) => {
-                    return Err(FilterError::NoBounds {
-                        what: "prop_in_range",
-                    });
+impl Compiler<'_> {
+    fn all(&mut self, fs: &[ObjectFilter], layer: LayerId) -> Result<Vec<F>, FilterError> {
+        fs.iter().map(|f| self.one(f, layer)).collect()
+    }
+
+    fn one(&mut self, f: &ObjectFilter, layer: LayerId) -> Result<F, FilterError> {
+        let grid = self.grid;
+        Ok(match f {
+            ObjectFilter::KindIs { kind } => F::Kind(kind.names().to_vec()),
+            ObjectFilter::PropIs { name, value } => {
+                let values = value.values();
+                if values.is_empty() {
+                    return Err(FilterError::NoValues);
                 }
-                (Some(a), Some(b)) if a > b => {
-                    return Err(FilterError::EmptyRange {
-                        what: "prop_in_range",
-                        min: a.to_string(),
-                        max: b.to_string(),
-                    });
-                }
-                (min, max) => (
-                    min.unwrap_or(f64::NEG_INFINITY),
-                    max.unwrap_or(f64::INFINITY),
-                ),
-            };
-            F::PropRange(name.clone(), min, max)
-        }
-        ObjectFilter::Neighbours { min, max, filter } => {
-            let (min, max) = count_range("neighbours", *min, *max)?;
-            F::Neighbours {
-                min,
-                max,
-                filter: compile_all(filter, grid, layer)?,
+                F::PropIs(name.clone(), values)
             }
-        }
-        ObjectFilter::Overlaps {
-            margin,
-            min,
-            max,
-            filter,
-        } => {
-            let (min, max) = count_range("overlaps", *min, *max)?;
-            F::Overlaps {
-                margin: *margin,
-                min,
-                max,
-                filter: compile_all(filter, grid, layer)?,
-            }
-        }
-        ObjectFilter::Slot { x, y } => {
-            let objects = grid.objects(layer)?;
-            if objects.lattice().is_none() {
-                return Err(FilterError::NoLattice {
-                    layer: grid.layer_name(layer).unwrap_or("?").to_string(),
-                });
-            }
-            let range = |r: &Option<IntRange>| -> Result<(i64, i64), FilterError> {
-                match r {
-                    None => Ok((i64::MIN, i64::MAX)),
-                    Some(IntRange::Exact(n)) => Ok((*n, *n)),
-                    Some(IntRange::Range(Between { min, max })) => match (*min, *max) {
-                        (None, None) => Err(FilterError::NoBounds { what: "slot" }),
-                        (Some(a), Some(b)) if a > b => Err(FilterError::EmptyRange {
-                            what: "slot",
+            ObjectFilter::HasProp { name } => F::HasProp(name.clone()),
+            ObjectFilter::PropInRange { name, min, max } => {
+                let (min, max) = match (*min, *max) {
+                    (None, None) => {
+                        return Err(FilterError::NoBounds {
+                            what: "prop_in_range",
+                        });
+                    }
+                    (Some(a), Some(b)) if a > b => {
+                        return Err(FilterError::EmptyRange {
+                            what: "prop_in_range",
                             min: a.to_string(),
                             max: b.to_string(),
-                        }),
-                        (a, b) => Ok((a.unwrap_or(i64::MIN), b.unwrap_or(i64::MAX))),
-                    },
+                        });
+                    }
+                    (min, max) => (
+                        min.unwrap_or(f64::NEG_INFINITY),
+                        max.unwrap_or(f64::INFINITY),
+                    ),
+                };
+                F::PropRange(name.clone(), min, max)
+            }
+            ObjectFilter::Neighbours { min, max, filter } => {
+                let (min, max) = count_range("neighbours", *min, *max)?;
+                F::Neighbours {
+                    min,
+                    max,
+                    filter: self.all(filter, layer)?,
                 }
-            };
-            F::Slot {
-                x: range(x)?,
-                y: range(y)?,
             }
-        }
-        ObjectFilter::RefersTo {
-            props,
-            layer: target,
-            filter,
-        } => {
-            let id = grid.layer_id(target)?;
-            let found = grid.kind(id)?;
-            if found != LayerKind::Objects {
-                return Err(GridError::WrongLayerKind {
-                    name: target.clone(),
-                    expected: LayerKind::Objects,
-                    found,
+            ObjectFilter::Overlaps {
+                margin,
+                min,
+                max,
+                filter,
+            } => {
+                let (min, max) = count_range("overlaps", *min, *max)?;
+                F::Overlaps {
+                    margin: *margin,
+                    min,
+                    max,
+                    filter: self.all(filter, layer)?,
                 }
-                .into());
             }
-            F::RefersTo {
-                props: props.names().to_vec(),
-                layer: id,
-                filter: compile_all(filter, grid, id)?,
+            ObjectFilter::Slot { x, y } => {
+                let objects = grid.objects(layer)?;
+                if objects.lattice().is_none() {
+                    return Err(FilterError::NoLattice {
+                        layer: grid.layer_name(layer).unwrap_or("?").to_string(),
+                    });
+                }
+                let range = |r: &Option<IntRange>| -> Result<(i64, i64), FilterError> {
+                    match r {
+                        None => Ok((i64::MIN, i64::MAX)),
+                        Some(IntRange::Exact(n)) => Ok((*n, *n)),
+                        Some(IntRange::Range(Between { min, max })) => match (*min, *max) {
+                            (None, None) => Err(FilterError::NoBounds { what: "slot" }),
+                            (Some(a), Some(b)) if a > b => Err(FilterError::EmptyRange {
+                                what: "slot",
+                                min: a.to_string(),
+                                max: b.to_string(),
+                            }),
+                            (a, b) => Ok((a.unwrap_or(i64::MIN), b.unwrap_or(i64::MAX))),
+                        },
+                    }
+                };
+                F::Slot {
+                    x: range(x)?,
+                    y: range(y)?,
+                }
             }
-        }
-        ObjectFilter::Any { filters } => {
-            if filters.is_empty() {
-                return Err(FilterError::EmptyAny);
+            ObjectFilter::RefersTo {
+                props,
+                layer: target,
+                filter,
+            } => {
+                let id = grid.layer_id(target)?;
+                let found = grid.kind(id)?;
+                if found != LayerKind::Objects {
+                    return Err(GridError::WrongLayerKind {
+                        name: target.clone(),
+                        expected: LayerKind::Objects,
+                        found,
+                    }
+                    .into());
+                }
+                F::RefersTo {
+                    props: props.names().to_vec(),
+                    layer: id,
+                    filter: self.all(filter, id)?,
+                }
             }
-            F::Any(compile_all(filters, grid, layer)?)
-        }
-        ObjectFilter::Not { filter } => F::Not(Box::new(compile(filter, grid, layer)?)),
-    })
+            ObjectFilter::Any { filters } => {
+                if filters.is_empty() {
+                    return Err(FilterError::EmptyAny);
+                }
+                F::Any(self.all(filters, layer)?)
+            }
+            ObjectFilter::Not { filter } => F::Not(Box::new(self.one(filter, layer)?)),
+            ObjectFilter::Cells {
+                condition,
+                min,
+                max,
+            } => {
+                for (bound, v) in [("min", min), ("max", max)] {
+                    if let Some(v) = *v
+                        && !(0.0..=1.0).contains(&v)
+                    {
+                        return Err(FilterError::ShareOutOfRange { bound, value: v });
+                    }
+                }
+                let (min, max) = match (*min, *max) {
+                    (None, None) => return Err(FilterError::NoBounds { what: "cells" }),
+                    (Some(a), Some(b)) if a > b => {
+                        return Err(FilterError::EmptyRange {
+                            what: "cells",
+                            min: a.to_string(),
+                            max: b.to_string(),
+                        });
+                    }
+                    (min, max) => (min.unwrap_or(0.0), max.unwrap_or(1.0)),
+                };
+                let c = condition
+                    .compile(grid, self.tiles)
+                    .map_err(|e| FilterError::Condition(Box::new(e)))?;
+                self.cells.push(c);
+                F::Cells {
+                    condition: self.cells.len() - 1,
+                    min,
+                    max,
+                }
+            }
+        })
+    }
 }
 
 /// A count's range, both ends counted; at least one must be given.
@@ -418,7 +539,7 @@ pub enum Subject {
     Box(Bounds),
 }
 
-fn test(f: &F, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
+fn test(f: &F, cells: &[CellMask], scene: &Scene, layer: LayerId, subject: Subject) -> bool {
     let object = || match subject {
         Subject::Object(i) => scene.objects(layer).get(i),
         Subject::Slot(_) | Subject::Box(_) => None,
@@ -428,7 +549,7 @@ fn test(f: &F, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
     let passes = |filter: &[F], j: usize| {
         filter
             .iter()
-            .all(|f| test(f, scene, layer, Subject::Object(j)))
+            .all(|f| test(f, cells, scene, layer, Subject::Object(j)))
     };
     match f {
         F::Kind(kinds) => object().is_some_and(|o| kinds.contains(&o.kind)),
@@ -477,12 +598,22 @@ fn test(f: &F, scene: &Scene, layer: LayerId, subject: Subject) -> bool {
                         .is_some_and(|j| {
                             filter
                                 .iter()
-                                .all(|f| test(f, scene, *target, Subject::Object(j)))
+                                .all(|f| test(f, cells, scene, *target, Subject::Object(j)))
                         })
                 })
         }),
-        F::Any(fs) => fs.iter().any(|f| test(f, scene, layer, subject)),
-        F::Not(f) => !test(f, scene, layer, subject),
+        F::Cells {
+            condition,
+            min,
+            max,
+        } => scene.bounds(layer, subject).is_some_and(|b| {
+            let holds = &cells[*condition];
+            let n = b.iter().filter(|&c| holds.get(c)).count();
+            let share = n as f64 / b.size.len() as f64;
+            *min <= share && share <= *max
+        }),
+        F::Any(fs) => fs.iter().any(|f| test(f, cells, scene, layer, subject)),
+        F::Not(f) => !test(f, cells, scene, layer, subject),
     }
 }
 

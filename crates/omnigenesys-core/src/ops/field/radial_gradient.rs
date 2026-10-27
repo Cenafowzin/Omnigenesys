@@ -14,6 +14,8 @@ use crate::{
 /// at the edge of the shape around it and beyond. The shape is the unit
 /// ball of the Lp norm (a superellipse): diamond at `shape` 0, circle at
 /// 0.5, square at 1, stretched by the two radii and turned by `rotation`.
+/// The centre is placed by the map's width and height, the radii by its
+/// shorter side.
 /// A `Curve` step after it shapes the slope; one with `invert` makes it 1
 /// at the centre, as an island wants.
 ///
@@ -30,11 +32,12 @@ pub struct RadialGradientConfig {
     /// The centre down the map: 0 the top edge, 1 the bottom.
     #[serde(default = "half")]
     pub y: f64,
-    /// Half the shape's width, as a fraction of the map's width: 0.5
-    /// reaches both edges from the middle.
+    /// Half the shape's width, as a fraction of the map's shorter side,
+    /// so equal radii make a circle on any map: 0.5 from the middle
+    /// reaches the two nearest edges.
     #[serde(default = "half")]
     pub radius_x: f64,
-    /// Half the shape's height, as a fraction of the map's height.
+    /// Half the shape's height, as a fraction of the map's shorter side.
     #[serde(default = "half")]
     pub radius_y: f64,
     /// Turns the shape, in degrees, clockwise (y grows downwards).
@@ -150,14 +153,14 @@ impl Operator for RadialGradient {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = match &self.when {
-            Some(c) => grid.prepare(c)?.eval(region),
-            None => CellMask::full(region),
-        };
+        let mask = grid
+            .mask(self.when.as_ref())?
+            .unwrap_or_else(|| CellMask::full(region));
         let map = grid.map();
         let (w, h) = (f64::from(map.size.width), f64::from(map.size.height));
         let (cx, cy) = (self.centre.0 * w, self.centre.1 * h);
-        let (rx, ry) = (self.radius.0 * w, self.radius.1 * h);
+        let side = w.min(h);
+        let (rx, ry) = (self.radius.0 * side, self.radius.1 * side);
         let layer = grid.scalars_mut(self.layer)?;
         for c in mask.iter_ones() {
             // From the centre to the centre of the cell, in cells, turned

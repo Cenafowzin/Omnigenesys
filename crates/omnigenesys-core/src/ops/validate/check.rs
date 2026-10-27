@@ -101,7 +101,8 @@ impl OperatorType for Check {
                 What::Cells(bcx.step_conditions().ok_or_else(|| {
                     invalid(
                         "conditions",
-                        "say which cells to count with the step's conditions,                          or which objects with `objects`"
+                        "say which cells to count with the step's conditions, \
+                         or which objects with `objects`"
                             .into(),
                     )
                 })?)
@@ -131,6 +132,7 @@ impl Operator for Check {
                 filter,
             } => {
                 let map = grid.map();
+                let filter = grid.prepare_filter(filter)?;
                 let split = grid.split(reads, &[])?;
                 let scene = Scene::new(
                     map,

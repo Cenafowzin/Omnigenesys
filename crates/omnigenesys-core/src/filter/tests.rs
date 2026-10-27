@@ -49,13 +49,27 @@ fn world(rooms: &[((u32, u32), serde_json::Value)]) -> (Grid, LayerId) {
     (grid, id)
 }
 
+/// The tiles the `cells` tests name.
+fn tiles() -> TileRegistry {
+    TileRegistry::new(["grama", "agua"]).unwrap()
+}
+
+fn compile(
+    fs: &[ObjectFilter],
+    grid: &Grid,
+    layer: LayerId,
+) -> Result<CompiledFilter, FilterError> {
+    CompiledFilter::compile(fs, grid, &tiles(), layer)
+}
+
 fn filters(v: serde_json::Value) -> Vec<ObjectFilter> {
     serde_json::from_value(v).unwrap()
 }
 
 /// Which objects of "salas" pass, by place.
 fn passing(grid: &Grid, id: LayerId, f: serde_json::Value) -> Vec<usize> {
-    let f = CompiledFilter::compile(&filters(f), grid, id).unwrap();
+    let f = compile(&filters(f), grid, id).unwrap();
+    let f = f.prepare(grid).unwrap();
     let scene = Scene::new(grid.map(), [(id, grid.objects(id).unwrap())]);
     (0..scene.objects(id).len())
         .filter(|&i| f.test(&scene, id, Subject::Object(i)))
@@ -115,8 +129,8 @@ fn overlaps_counts_objects_and_candidate_boxes() {
         "with a margin they do"
     );
     // A box no object fills yet, over the first room.
-    let f = CompiledFilter::compile(&filters(json!([{"type": "overlaps", "max": 0}])), &grid, id)
-        .unwrap();
+    let f = compile(&filters(json!([{"type": "overlaps", "max": 0}])), &grid, id).unwrap();
+    let f = f.prepare(&grid).unwrap();
     let scene = Scene::new(grid.map(), [(id, grid.objects(id).unwrap())]);
     assert!(!f.test(&scene, id, Subject::Box(b(2, 2, 3, 3))));
     assert!(f.test(&scene, id, Subject::Box(b(10, 0, 3, 3))));
@@ -258,8 +272,8 @@ fn neighbours_count_objects_side_by_side() {
         [2]
     );
     // Empty slots count the objects around them too.
-    let f = CompiledFilter::compile(&filters(json!([{"type": "neighbours", "min": 2}])), &g, id)
-        .unwrap();
+    let f = compile(&filters(json!([{"type": "neighbours", "min": 2}])), &g, id).unwrap();
+    let f = f.prepare(&g).unwrap();
     let scene = Scene::new(g.map(), [(id, g.objects(id).unwrap())]);
     let corners: Vec<usize> = scene
         .empty_slots(id)
@@ -282,8 +296,7 @@ fn slot_is_the_place_on_the_lattice() {
     // Without a lattice, at build time.
     let mut plain = Grid::new(b(0, 0, 10, 10));
     let p = plain.add_layer("solta", LayerKind::Objects).unwrap();
-    let e = CompiledFilter::compile(&filters(json!([{"type": "slot", "x": 0}])), &plain, p)
-        .unwrap_err();
+    let e = compile(&filters(json!([{"type": "slot", "x": 0}])), &plain, p).unwrap_err();
     assert!(e.to_string().contains("'solta' has none"), "{e}");
 }
 
@@ -313,7 +326,7 @@ fn refers_to_looks_into_another_layer() {
         b(0, 0, 1, 1),
         vec![("from".into(), Value::Object(ids[1]))],
     );
-    let f = CompiledFilter::compile(
+    let f = compile(
         &filters(
             json!([{"type": "refers_to", "props": ["from", "to"], "layer": "salas",
             "where": [{"type": "prop_is", "name": "role", "value": "secreta"}]}]),
@@ -323,6 +336,7 @@ fn refers_to_looks_into_another_layer() {
     )
     .unwrap();
     assert_eq!(f.layers(), [rooms]);
+    let f = f.prepare(&g).unwrap();
     let scene = Scene::new(
         g.map(),
         [
@@ -359,7 +373,7 @@ fn bad_filters_fail_when_compiled() {
             "'nada' not found",
         ),
     ] {
-        let e = CompiledFilter::compile(&filters(f.clone()), &g, id).unwrap_err();
+        let e = compile(&filters(f.clone()), &g, id).unwrap_err();
         assert!(e.to_string().contains(words), "{f}: {e}");
     }
     // A typo is an error, never a filter that passes everything.
@@ -394,4 +408,72 @@ fn a_scene_sees_objects_added_while_a_step_runs() {
         [1]
     );
     assert_eq!(scene.slot_of(id, Subject::Object(1)), Some((2, 1)));
+}
+
+/// Rooms in slots (0, 0) and (1, 0) — x 0..=4 and 5..=9, y 0..=3 — on a
+/// terrain of grass where x < 7 and y < 4, and water everywhere else.
+fn on_terrain() -> (Grid, LayerId) {
+    let (mut g, id) = world(&[((0, 0), json!({})), ((1, 0), json!({}))]);
+    let t = g.add_layer("terreno", LayerKind::Tiles).unwrap();
+    let (grama, agua) = (tiles().id("grama").unwrap(), tiles().id("agua").unwrap());
+    let map = g.map();
+    let layer = g.tiles_mut(t).unwrap();
+    for c in map.iter() {
+        let tile = if c.x < 7 && c.y < 4 { grama } else { agua };
+        layer.set(c, tile).unwrap();
+    }
+    (g, id)
+}
+
+fn on(tile: &str, range: serde_json::Value) -> serde_json::Value {
+    let mut f = json!({"type": "cells", "condition": {"type": "tile_is", "layer": "terreno", "tile": tile}});
+    f.as_object_mut()
+        .unwrap()
+        .extend(range.as_object().unwrap().clone());
+    json!([f])
+}
+
+#[test]
+fn cells_is_the_share_of_the_box_where_the_condition_holds() {
+    let (g, id) = on_terrain();
+    // Room 0 is all grass; room 1 is 2 columns of 5 on grass, 0.4.
+    assert_eq!(passing(&g, id, on("grama", json!({"min": 1}))), [0]);
+    assert_eq!(passing(&g, id, on("grama", json!({"min": 0.4}))), [0, 1]);
+    assert_eq!(passing(&g, id, on("grama", json!({"min": 0.41}))), [0]);
+    assert_eq!(passing(&g, id, on("agua", json!({"max": 0}))), [0]);
+    assert_eq!(
+        passing(&g, id, on("agua", json!({"min": 0.5, "max": 0.7}))),
+        [1]
+    );
+    // A box past the map's edge: the cells off it do not hold. Row 5 is
+    // all water; x 13..=16 has two cells on the map.
+    let f = compile(&filters(on("agua", json!({"min": 0.5}))), &g, id).unwrap();
+    let f = f.prepare(&g).unwrap();
+    let scene = Scene::new(g.map(), [(id, g.objects(id).unwrap())]);
+    assert!(f.test(&scene, id, Subject::Box(b(13, 5, 4, 1))));
+    let f = compile(&filters(on("agua", json!({"min": 0.6}))), &g, id).unwrap();
+    let f = f.prepare(&g).unwrap();
+    assert!(!f.test(&scene, id, Subject::Box(b(13, 5, 4, 1))));
+}
+
+#[test]
+fn cells_needs_a_share_and_stays_out_of_conditions() {
+    let (g, id) = on_terrain();
+    for (range, words) in [
+        (json!({}), "at least one of `min` or `max`"),
+        (json!({"min": 1.5}), "`min` is 1.5, not between 0 and 1"),
+        (json!({"min": 0.8, "max": 0.2}), "range is empty"),
+    ] {
+        let e = compile(&filters(on("grama", range.clone())), &g, id).unwrap_err();
+        assert!(e.to_string().contains(words), "{range}: {e}");
+    }
+    let e = compile(&filters(on("lava", json!({"min": 1}))), &g, id).unwrap_err();
+    assert!(e.to_string().contains("lava"), "{e}");
+    // Inside a condition it is refused, with the way around it.
+    let c: Condition = serde_json::from_value(
+        json!({"type": "in_object", "layer": "salas", "where": on("grama", json!({"min": 1}))}),
+    )
+    .unwrap();
+    let e = c.compile(&g, &tiles()).unwrap_err();
+    assert!(e.to_string().contains("TagObjects"), "{e}");
 }

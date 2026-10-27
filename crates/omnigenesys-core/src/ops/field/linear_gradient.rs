@@ -95,10 +95,9 @@ impl Operator for LinearGradient {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = match &self.when {
-            Some(c) => grid.prepare(c)?.eval(region),
-            None => CellMask::full(region),
-        };
+        let mask = grid
+            .mask(self.when.as_ref())?
+            .unwrap_or_else(|| CellMask::full(region));
         let map = grid.map();
         let (w, h) = (f64::from(map.size.width), f64::from(map.size.height));
         // How far the map reaches along the direction, corner to corner.

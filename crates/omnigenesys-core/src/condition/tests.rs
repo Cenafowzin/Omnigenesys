@@ -1064,10 +1064,10 @@ fn offset_in_z_on_a_2d_map_is_an_error() {
     .is_ok());
 }
 
-// neighbors
+// neighbours
 
 #[test]
-fn neighbors_counts_the_sides_or_all_around() {
+fn neighbours_counts_the_sides_or_all_around() {
     let mut w = world_2d();
     // Floor left and right of (13, 23), and on its upper-left corner.
     for c in [(12, 23), (14, 23), (12, 22)] {
@@ -1077,7 +1077,7 @@ fn neighbors_counts_the_sides_or_all_around() {
     let with = |shape: &str, range: &str| {
         prepare_json(
             &format!(
-                r#"{{"type": "neighbors", "shape": "{shape}", {range}, "condition": {floor}}}"#
+                r#"{{"type": "neighbours", "shape": "{shape}", {range}, "condition": {floor}}}"#
             ),
             &w,
         )
@@ -1099,7 +1099,7 @@ fn past_the_edge_of_the_map_a_neighbour_passes_nothing() {
     let p = |shape: &str| {
         prepare_json(
             &format!(
-                r#"{{"type": "neighbors", "shape": "{shape}", "min": 0, "condition": {empty}}}"#
+                r#"{{"type": "neighbours", "shape": "{shape}", "min": 0, "condition": {empty}}}"#
             ),
             &w,
         )
@@ -1107,7 +1107,7 @@ fn past_the_edge_of_the_map_a_neighbour_passes_nothing() {
     let exactly = |shape: &str, n: u32| {
         prepare_json(
             &format!(
-                r#"{{"type": "neighbors", "shape": "{shape}", "min": {n}, "max": {n}, "condition": {empty}}}"#
+                r#"{{"type": "neighbours", "shape": "{shape}", "min": {n}, "max": {n}, "condition": {empty}}}"#
             ),
             &w,
         )
@@ -1124,7 +1124,7 @@ fn past_the_edge_of_the_map_a_neighbour_passes_nothing() {
 }
 
 #[test]
-fn neighbors_matches_a_naive_count_on_a_random_map() {
+fn neighbours_matches_a_naive_count_on_a_random_map() {
     let mut w = world_3d();
     w.randomize(w.terrain, 0x9E37_79B9_7F4A_7C15);
     let map = w.grid.bounds();
@@ -1135,7 +1135,7 @@ fn neighbors_matches_a_naive_count_on_a_random_map() {
     for (shape, min, max) in [("sides", 2, 3), ("all", 6, 9)] {
         // Floor next to a wall, counted around the cell.
         let json = format!(
-            r#"{{"type": "neighbors", "shape": "{shape}", "min": {min}, "max": {max},
+            r#"{{"type": "neighbours", "shape": "{shape}", "min": {min}, "max": {max},
                 "condition": {{"type": "any", "conditions": [
                     {{"type": "tile_is", "layer": "terrain", "tile": "floor"}},
                     {{"type": "offset", "x": 1, "condition": {{"type": "tile_is", "layer": "terrain", "tile": "wall"}}}}]}}}}"#
@@ -1172,9 +1172,9 @@ fn neighbors_matches_a_naive_count_on_a_random_map() {
 }
 
 #[test]
-fn neighbors_reads_one_more_cell_around() {
+fn neighbours_reads_one_more_cell_around() {
     let w = world_2d();
-    let json = r#"{"type": "neighbors", "min": 1, "condition":
+    let json = r#"{"type": "neighbours", "min": 1, "condition":
         {"type": "offset", "x": 2, "condition": {"type": "tile_is", "layer": "terrain", "tile": "wall"}}}"#;
     let c = parse(json).unwrap().compile(&w.grid, &w.tiles).unwrap();
     // x: the offset reads 2 above, a neighbour 1 more on each side. A
@@ -1188,22 +1188,22 @@ fn neighbors_reads_one_more_cell_around() {
 }
 
 #[test]
-fn neighbors_needs_a_range_it_can_meet() {
+fn neighbours_needs_a_range_it_can_meet() {
     let w = world_2d();
     let json = |range: &str| {
         format!(
-            r#"{{"type": "neighbors", {range} "condition": {{"type": "tile_is", "layer": "terrain", "tile": "wall"}}}}"#
+            r#"{{"type": "neighbours", {range} "condition": {{"type": "tile_is", "layer": "terrain", "tile": "wall"}}}}"#
         )
     };
     let err = |range: &str| compile_json(&json(range), &w).unwrap_err();
-    assert_eq!(err(""), ConditionError::NeighborsWithNoBounds);
+    assert_eq!(err(""), ConditionError::NeighboursWithNoBounds);
     assert_eq!(
         err(r#""min": 3, "max": 2,"#),
-        ConditionError::EmptyNeighborsRange { min: 3, max: 2 }
+        ConditionError::EmptyNeighboursRange { min: 3, max: 2 }
     );
     assert_eq!(
         err(r#""min": 5,"#),
-        ConditionError::MoreNeighborsThanThereAre { min: 5, count: 4 }
+        ConditionError::MoreNeighboursThanThereAre { min: 5, count: 4 }
     );
     assert!(compile_json(&json(r#""shape": "all", "min": 8,"#), &w).is_ok());
     assert!(compile_json(&json(r#""min": 6,"#), &world_3d()).is_ok());

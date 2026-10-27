@@ -559,6 +559,37 @@ fn loose(count: Json) -> Json {
         "where": [{"type": "overlaps", "margin": 1, "max": 0}]}})
 }
 
+/// A lake of `parede` 20 cells in from every edge: loose rooms with
+/// `cells` off it keep to the shore, the whole box, as they are placed.
+#[test]
+fn loose_boxes_keep_off_the_cells_a_filter_names() {
+    let mut rooms = loose(json!(10));
+    rooms["config"]["where"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type": "cells", "max": 0,
+            "condition": {"type": "tile_is", "layer": "terreno", "tile": "parede"}}));
+    let g = run(&pipeline(json!([
+        {"id": "terra", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao"}},
+        {"id": "lago", "operator": "Fill", "config": {"layer": "terreno", "tile": "parede"},
+         "conditions": [{"type": "edge_distance", "min": 20}]},
+        rooms,
+    ])));
+    let rooms = objects(&g, "solta");
+    assert_eq!(rooms.len(), 10);
+    let map = g.map().size;
+    let lake = |x: i32, y: i32| {
+        let edge = x
+            .min(map.width as i32 - 1 - x)
+            .min(y)
+            .min(map.height as i32 - 1 - y);
+        edge >= 20
+    };
+    for r in &rooms {
+        assert!(r.bbox.iter().all(|c| !lake(c.x, c.y)), "{:?}", r.bbox);
+    }
+}
+
 #[test]
 fn loose_boxes_fit_the_map_their_size_and_their_margin() {
     let g = run(&pipeline(json!([loose(json!(12))])));

@@ -4,6 +4,7 @@ use serde::Deserialize;
 use crate::{
     access::{Reach, ReadHandle, WriteHandle},
     condition::CompiledCondition,
+    layer::Layer,
     mask::CellMask,
     operator::{
         BuildContext, BuildError, Context, Dimensions, OpError, Operator, OperatorType, Scope,
@@ -77,7 +78,13 @@ impl OperatorType for Combine {
                 ));
             }
             let weight = match (c.op, input.weight) {
-                (CombineOp::Sum, Some(w)) => w as f32,
+                (CombineOp::Sum, Some(w)) if w.is_finite() => w as f32,
+                (CombineOp::Sum, Some(w)) => {
+                    return Err(invalid(
+                        format!("inputs/{i}/weight"),
+                        format!("{w} is not a number"),
+                    ));
+                }
                 (CombineOp::Sum, None) => 1.0,
                 (_, Some(_)) => {
                     return Err(invalid(
@@ -106,19 +113,35 @@ impl Operator for Combine {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = match &self.when {
-            Some(c) => grid.prepare(c)?.eval(region),
-            None => CellMask::full(region),
-        };
-        // Copies of the inputs: the output may be one of them.
-        let inputs = self
+        let mask = grid
+            .mask(self.when.as_ref())?
+            .unwrap_or_else(|| CellMask::full(region));
+        // An input that is the output is read from it: each cell is read
+        // before it is written, and no other cell is read.
+        let others: Vec<ReadHandle> = self
             .inputs
             .iter()
-            .map(|&(h, w)| Ok((grid.scalars(h)?.clone(), w)))
-            .collect::<Result<Vec<_>, OpError>>()?;
-        let out = grid.scalars_mut(self.out)?;
+            .map(|&(h, _)| h)
+            .filter(|h| h.layer() != self.out.layer())
+            .collect();
+        let mut split = grid.split(&others, &[self.out])?;
+        let mut reads = split.reads.iter().map(|l| l.as_scalar());
+        // `None` for the output.
+        let inputs: Vec<(Option<&Layer<f32>>, f32)> = self
+            .inputs
+            .iter()
+            .map(|&(h, w)| {
+                let l = (h.layer() != self.out.layer())
+                    .then(|| reads.next().flatten().expect("checked when built"));
+                (l, w)
+            })
+            .collect();
+        let out = split.writes[0].as_scalar_mut().expect("checked when built");
         for c in mask.iter_ones() {
-            let values = inputs.iter().map(|(l, w)| (*l.get(c).unwrap_or(&0.0), *w));
+            let here = *out.get(c).unwrap_or(&0.0);
+            let values = inputs
+                .iter()
+                .map(|(l, w)| (l.map_or(here, |l| *l.get(c).unwrap_or(&0.0)), *w));
             // There are always two or more inputs, so the infinities never
             // come out.
             let v = match self.op {

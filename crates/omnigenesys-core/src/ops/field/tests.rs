@@ -157,7 +157,8 @@ fn radial_gradient_follows_its_formula() {
             for x in 0..8 {
                 let px = x as f64 + 0.5 - cx * 8.0;
                 let py = y as f64 + 0.5 - cy * 6.0;
-                let u = (px * cos + py * sin) / (rx * 8.0);
+                // The radii are of the shorter side, 6.
+                let u = (px * cos + py * sin) / (rx * 6.0);
                 let v = (py * cos - px * sin) / (ry * 6.0);
                 let want = (u.abs().powf(p) + v.abs().powf(p)).powf(1.0 / p).min(1.0);
                 let got = f64::from(out[y * 8 + x]);
@@ -168,20 +169,23 @@ fn radial_gradient_follows_its_formula() {
             }
         }
     }
-    // Square is the larger of the two distances.
+    // Square is the larger of the two distances, and with equal radii a
+    // square on the 8 × 6 map: 3 cells out both ways, not 4 by 3, and 1
+    // past it.
     let out = radial(json!({"shape": 1}));
     for y in 0..6 {
         for x in 0..8 {
-            let u = ((x as f64 + 0.5) - 4.0) / 4.0;
+            let u = ((x as f64 + 0.5) - 4.0) / 3.0;
             let v = ((y as f64 + 0.5) - 3.0) / 3.0;
-            assert_eq!(out[y * 8 + x], u.abs().max(v.abs()) as f32, "({x}, {y})");
+            let want = u.abs().max(v.abs()).min(1.0);
+            assert_eq!(out[y * 8 + x], want as f32, "({x}, {y})");
         }
     }
 }
 
 #[test]
 fn radial_gradient_shapes_and_turns() {
-    // The defaults: a circle in the middle reaching the map's edges.
+    // The defaults: a circle in the middle reaching the nearest edges.
     assert_eq!(
         radial(json!({})),
         radial(json!({"x": 0.5, "y": 0.5, "radius_x": 0.5, "radius_y": 0.5,
@@ -266,7 +270,7 @@ fn curved(width: u32, curve: Value, invert: bool) -> (Vec<f32>, Vec<f32>) {
         (width, 1),
         json!([{"id": "rampa", "operator": "LinearGradient", "config": {"layer": "distancia"}},
                {"id": "curva", "operator": "Curve", "config": {
-                   "input": "distancia", "layer": "altura", "curve": curve, "invert": invert}}]),
+                   "from": "distancia", "layer": "altura", "curve": curve, "invert": invert}}]),
     ));
     (scalars(&g, "distancia"), heights(&g))
 }
@@ -367,7 +371,7 @@ fn curve_shapes_behave() {
                {"id": "triplo", "operator": "Combine", "config": {
                    "inputs": [{"layer": "distancia", "weight": 3}, {"layer": "altura"}],
                    "op": "sum", "layer": "distancia"}},
-               {"id": "curva", "operator": "Curve", "config": {"input": "distancia", "layer": "altura",
+               {"id": "curva", "operator": "Curve", "config": {"from": "distancia", "layer": "altura",
                 "curve": {"kind": "power", "exponent": 2}}}]),
     ));
     assert_eq!(heights(&g)[2], 1.0);
@@ -673,34 +677,34 @@ fn bad_field_configs_fail_the_build() {
         ),
         (
             "Curve",
-            json!({"input": "altura", "layer": "altura", "curve": {"kind": "power", "exponent": 0}}),
+            json!({"from": "altura", "layer": "altura", "curve": {"kind": "power", "exponent": 0}}),
             "not above 0",
         ),
         (
             "Curve",
-            json!({"input": "altura", "layer": "altura",
+            json!({"from": "altura", "layer": "altura",
                    "curve": {"kind": "sigmoid", "exponent": 2, "midpoint": 1}}),
             "midpoint",
         ),
         (
             "Curve",
-            json!({"input": "altura", "layer": "altura", "curve": {"kind": "terrace", "steps": 0}}),
+            json!({"from": "altura", "layer": "altura", "curve": {"kind": "terrace", "steps": 0}}),
             "at least 1",
         ),
         (
             "Curve",
-            json!({"input": "altura", "layer": "altura", "curve": {"kind": "points", "points": [[0, 0]]}}),
+            json!({"from": "altura", "layer": "altura", "curve": {"kind": "points", "points": [[0, 0]]}}),
             "at least two points",
         ),
         (
             "Curve",
-            json!({"input": "altura", "layer": "altura",
+            json!({"from": "altura", "layer": "altura",
                    "curve": {"kind": "points", "points": [[0.5, 0], [0.5, 1]]}}),
             "does not come after",
         ),
         (
             "Curve",
-            json!({"input": "altura", "layer": "altura",
+            json!({"from": "altura", "layer": "altura",
                    "curve": {"kind": "power", "exponent": 2, "steps": 3}}),
             "steps",
         ),

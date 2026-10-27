@@ -41,9 +41,10 @@
     {
       "id": "centro",
       "operator": "RadialGradient",
-      "description": "Distância do centro: 0 no meio, 1 numa borda quase quadrada que toca os lados do mapa.",
+      "description": "Distância do centro: 0 no meio, 1 numa borda quase quadrada que toca os quatro lados do mapa; o raio ←→ é maior porque os raios se medem pelo lado menor.",
       "config": {
         "layer": "distancia",
+        "radius_x": 0.8,
         "shape": 0.75
       }
     },
@@ -52,7 +53,7 @@
       "operator": "Curve",
       "description": "Eleva a distância ao quadrado e inverte: 1 no centro, caindo devagar perto do meio e depressa perto da borda.",
       "config": {
-        "input": "distancia",
+        "from": "distancia",
         "layer": "distancia",
         "curve": {
           "kind": "power",
