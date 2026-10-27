@@ -955,3 +955,256 @@ fn radius_volume_is_the_full_box_and_saturates() {
     assert_eq!(rad(2, 1, 3).volume(), 5 * 3 * 7);
     assert_eq!(rad(u32::MAX, u32::MAX, u32::MAX).volume(), u64::MAX);
 }
+
+// offset
+
+#[test]
+fn offset_looks_at_the_cell_that_far_away() {
+    let mut w = world_2d();
+    let floor = Coord::new(12, 21, 5);
+    w.paint(w.terrain, floor, "floor");
+    let left_is_floor = prepare_json(
+        r#"{"type": "offset", "x": -1, "condition": {"type": "tile_is", "layer": "terrain", "tile": "floor"}}"#,
+        &w,
+    );
+    assert!(left_is_floor.test(Coord::new(13, 21, 5)));
+    assert!(!left_is_floor.test(floor));
+    assert!(!left_is_floor.test(Coord::new(13, 22, 5)));
+}
+
+#[test]
+fn past_the_edge_of_the_map_offset_is_false_and_not_offset_true() {
+    let w = world_2d();
+    // Every cell is empty, so the condition holds on every cell of the map.
+    let empty = r#"{"type": "tile_is", "layer": "terrain", "tile": "empty"}"#;
+    let left = format!(r#"{{"type": "offset", "x": -1, "condition": {empty}}}"#);
+    let p = prepare_json(&left, &w);
+    let edge = Coord::new(10, 23, 5);
+    assert!(!p.test(edge), "no cell to the left of the left edge");
+    assert!(p.test(Coord::new(11, 23, 5)));
+    let not_left = format!(r#"{{"type": "not", "condition": {left}}}"#);
+    assert!(prepare_json(&not_left, &w).test(edge));
+    // The same with a condition that holds outside the layer too.
+    let not_wall =
+        r#"{"type": "not", "condition": {"type": "tile_is", "layer": "terrain", "tile": "wall"}}"#;
+    let up = format!(r#"{{"type": "offset", "y": -1, "condition": {not_wall}}}"#);
+    assert!(!prepare_json(&up, &w).test(Coord::new(12, 20, 5)));
+    for region in regions_around(w.grid.bounds()) {
+        assert_eval_agrees_with_test(&p, region);
+        assert_eval_agrees_with_test(&prepare_json(&up, &w), region);
+    }
+}
+
+#[test]
+fn offset_matches_a_naive_evaluation_on_a_random_map() {
+    let mut w = world_3d();
+    w.randomize(w.terrain, 0x2545_F491_4F6C_DD1D);
+    // Floor two to the right and one up in z, with a wall within 1 of that
+    // cell, or no water just below in y.
+    let json = r#"{"type": "any", "conditions": [
+        {"type": "offset", "x": 2, "z": 1, "condition": {"type": "all", "conditions": [
+            {"type": "tile_is", "layer": "terrain", "tile": "floor"},
+            {"type": "near_type", "layer": "terrain", "tile": "wall", "distance": 1}]}},
+        {"type": "not", "condition": {"type": "offset", "y": 1,
+            "condition": {"type": "tile_is", "layer": "terrain", "tile": "water"}}}
+    ]}"#;
+    let p = prepare_json(json, &w);
+    let map = w.grid.bounds();
+    let terrain = w.grid.tiles(w.terrain).unwrap();
+    let is = |c: Coord, name: &str| {
+        map.contains(c) && *terrain.get(c).unwrap() == w.tiles.id(name).unwrap()
+    };
+    let mut matched = 0;
+    for c in map.iter() {
+        let a = Coord::new(c.x + 2, c.y, c.z + 1);
+        let near_wall = (a.x - 1..=a.x + 1).any(|x| {
+            (a.y - 1..=a.y + 1)
+                .any(|y| (a.z - 1..=a.z + 1).any(|z| is(Coord::new(x, y, z), "wall")))
+        });
+        let below = Coord::new(c.x, c.y + 1, c.z);
+        let naive = (is(a, "floor") && near_wall) || !is(below, "water");
+        assert_eq!(p.test(c), naive, "cell {c:?}");
+        matched += usize::from(naive);
+    }
+    assert!(matched > 0 && matched < map.size.len());
+    for region in regions_around(map) {
+        assert_eval_agrees_with_test(&p, region);
+    }
+}
+
+#[test]
+fn offset_moves_what_the_inner_condition_reads() {
+    let w = world_2d();
+    let json = r#"{"type": "offset", "x": -1, "y": 3,
+        "condition": {"type": "near_type", "layer": "terrain", "tile": "wall", "distance": 1}}"#;
+    let c = parse(json).unwrap().compile(&w.grid, &w.tiles).unwrap();
+    // x: one more below, one less above; y: none below (3 - 1 past it),
+    // four above.
+    let reach = Reach {
+        below: [2, 0, 0],
+        above: [0, 4, 0],
+    };
+    assert_eq!(c.reads(), vec![(w.terrain, reach)]);
+}
+
+#[test]
+fn offset_in_z_on_a_2d_map_is_an_error() {
+    let w = world_2d();
+    let e = compile_json(
+        r#"{"type": "offset", "z": 1, "condition": {"type": "tile_is", "layer": "terrain", "tile": "wall"}}"#,
+        &w,
+    )
+    .unwrap_err();
+    assert_eq!(e, ConditionError::OffsetInZOn2d { z: 1 });
+    assert!(e.to_string().contains("the map is 2D"));
+    assert!(compile_json(
+        r#"{"type": "offset", "z": 1, "condition": {"type": "tile_is", "layer": "terrain", "tile": "wall"}}"#,
+        &world_3d(),
+    )
+    .is_ok());
+}
+
+// neighbors
+
+#[test]
+fn neighbors_counts_the_sides_or_all_around() {
+    let mut w = world_2d();
+    // Floor left and right of (13, 23), and on its upper-left corner.
+    for c in [(12, 23), (14, 23), (12, 22)] {
+        w.paint(w.terrain, Coord::new(c.0, c.1, 5), "floor");
+    }
+    let floor = r#"{"type": "tile_is", "layer": "terrain", "tile": "floor"}"#;
+    let with = |shape: &str, range: &str| {
+        prepare_json(
+            &format!(
+                r#"{{"type": "neighbors", "shape": "{shape}", {range}, "condition": {floor}}}"#
+            ),
+            &w,
+        )
+    };
+    let cell = Coord::new(13, 23, 5);
+    assert!(with("sides", r#""min": 2, "max": 2"#).test(cell));
+    assert!(!with("sides", r#""min": 3"#).test(cell));
+    assert!(with("all", r#""min": 3, "max": 3"#).test(cell));
+    // The cell itself is not one of its neighbours:
+    // (12, 22) is floor, and only (12, 23) of its neighbours.
+    assert!(with("all", r#""min": 1, "max": 1"#).test(Coord::new(12, 22, 5)));
+    assert!(with("all", r#""min": 1, "max": 1"#).test(Coord::new(15, 23, 5)));
+}
+
+#[test]
+fn past_the_edge_of_the_map_a_neighbour_passes_nothing() {
+    let w = world_2d();
+    let empty = r#"{"type": "tile_is", "layer": "terrain", "tile": "empty"}"#;
+    let p = |shape: &str| {
+        prepare_json(
+            &format!(
+                r#"{{"type": "neighbors", "shape": "{shape}", "min": 0, "condition": {empty}}}"#
+            ),
+            &w,
+        )
+    };
+    let exactly = |shape: &str, n: u32| {
+        prepare_json(
+            &format!(
+                r#"{{"type": "neighbors", "shape": "{shape}", "min": {n}, "max": {n}, "condition": {empty}}}"#
+            ),
+            &w,
+        )
+    };
+    let corner = Coord::new(10, 20, 5);
+    assert!(exactly("sides", 2).test(corner));
+    assert!(exactly("all", 3).test(corner));
+    assert!(exactly("sides", 3).test(Coord::new(12, 20, 5)));
+    assert!(exactly("all", 8).test(Coord::new(12, 22, 5)));
+    for region in regions_around(w.grid.bounds()) {
+        assert_eval_agrees_with_test(&exactly("sides", 2), region);
+        assert_eval_agrees_with_test(&p("all"), region);
+    }
+}
+
+#[test]
+fn neighbors_matches_a_naive_count_on_a_random_map() {
+    let mut w = world_3d();
+    w.randomize(w.terrain, 0x9E37_79B9_7F4A_7C15);
+    let map = w.grid.bounds();
+    let terrain = w.grid.tiles(w.terrain).unwrap();
+    let is = |c: Coord, name: &str| {
+        map.contains(c) && *terrain.get(c).unwrap() == w.tiles.id(name).unwrap()
+    };
+    for (shape, min, max) in [("sides", 2, 3), ("all", 6, 9)] {
+        // Floor next to a wall, counted around the cell.
+        let json = format!(
+            r#"{{"type": "neighbors", "shape": "{shape}", "min": {min}, "max": {max},
+                "condition": {{"type": "any", "conditions": [
+                    {{"type": "tile_is", "layer": "terrain", "tile": "floor"}},
+                    {{"type": "offset", "x": 1, "condition": {{"type": "tile_is", "layer": "terrain", "tile": "wall"}}}}]}}}}"#
+        );
+        let p = prepare_json(&json, &w);
+        let mut matched = 0;
+        for c in map.iter() {
+            let mut n = 0;
+            for dz in -1i32..=1 {
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        let away = dx.abs() + dy.abs() + dz.abs();
+                        if away == 0 || (shape == "sides" && away > 1) {
+                            continue;
+                        }
+                        let s = Coord::new(c.x + dx, c.y + dy, c.z + dz);
+                        let right = Coord::new(s.x + 1, s.y, s.z);
+                        n += u32::from(map.contains(s) && (is(s, "floor") || is(right, "wall")));
+                    }
+                }
+            }
+            let naive = (min..=max).contains(&n);
+            assert_eq!(p.test(c), naive, "{shape}, cell {c:?}");
+            matched += usize::from(naive);
+        }
+        assert!(
+            matched > 0 && matched < map.size.len(),
+            "{shape}: {matched}"
+        );
+        for region in regions_around(map) {
+            assert_eval_agrees_with_test(&p, region);
+        }
+    }
+}
+
+#[test]
+fn neighbors_reads_one_more_cell_around() {
+    let w = world_2d();
+    let json = r#"{"type": "neighbors", "min": 1, "condition":
+        {"type": "offset", "x": 2, "condition": {"type": "tile_is", "layer": "terrain", "tile": "wall"}}}"#;
+    let c = parse(json).unwrap().compile(&w.grid, &w.tiles).unwrap();
+    // x: the offset reads 2 above, a neighbour 1 more on each side. A
+    // reach always holds the cell itself, so the left neighbour's
+    // `[0, 2]` becomes 1 below: one cell more than needed, never less.
+    let reach = Reach {
+        below: [1, 1, 0],
+        above: [3, 1, 0],
+    };
+    assert_eq!(c.reads(), vec![(w.terrain, reach)]);
+}
+
+#[test]
+fn neighbors_needs_a_range_it_can_meet() {
+    let w = world_2d();
+    let json = |range: &str| {
+        format!(
+            r#"{{"type": "neighbors", {range} "condition": {{"type": "tile_is", "layer": "terrain", "tile": "wall"}}}}"#
+        )
+    };
+    let err = |range: &str| compile_json(&json(range), &w).unwrap_err();
+    assert_eq!(err(""), ConditionError::NeighborsWithNoBounds);
+    assert_eq!(
+        err(r#""min": 3, "max": 2,"#),
+        ConditionError::EmptyNeighborsRange { min: 3, max: 2 }
+    );
+    assert_eq!(
+        err(r#""min": 5,"#),
+        ConditionError::MoreNeighborsThanThereAre { min: 5, count: 4 }
+    );
+    assert!(compile_json(&json(r#""shape": "all", "min": 8,"#), &w).is_ok());
+    assert!(compile_json(&json(r#""min": 6,"#), &world_3d()).is_ok());
+}

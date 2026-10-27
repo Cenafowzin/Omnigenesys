@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Masmorra clássica: salas soltas sem se tocar, a árvore mais curta entre elas e alguns laços, corredores em L, início ao acaso e chefe na sala mais longe",
+  "description": "Masmorra clássica: salas soltas sem se tocar, a árvore mais curta entre elas e alguns laços, corredores pelo caminho mais barato (atravessam parede, não correm junto dela), porta só onde a passagem é de um eixo, início ao acaso e chefe na sala mais longe",
   "seed": 512,
   "size": {
     "width": 96,
@@ -126,7 +126,97 @@
         "objects": "salas",
         "layer": "terreno",
         "tile": "chao",
-        "shape": "l"
+        "shape": "cheapest",
+        "costs": [
+          {
+            "where": [
+              {
+                "type": "in_object",
+                "layer": "salas",
+                "part": "wall"
+              },
+              {
+                "type": "tile_is",
+                "layer": "terreno",
+                "tile": "chao"
+              }
+            ],
+            "cost": 1
+          },
+          {
+            "where": [
+              {
+                "type": "in_object",
+                "layer": "salas",
+                "part": "wall"
+              },
+              {
+                "type": "neighbors",
+                "max": 0,
+                "condition": {
+                  "type": "in_object",
+                  "layer": "salas",
+                  "part": "inside"
+                }
+              }
+            ],
+            "cost": "blocked"
+          },
+          {
+            "where": [
+              {
+                "type": "in_object",
+                "layer": "salas",
+                "part": "wall"
+              },
+              {
+                "type": "neighbors",
+                "min": 1,
+                "condition": {
+                  "type": "all",
+                  "conditions": [
+                    {
+                      "type": "in_object",
+                      "layer": "salas",
+                      "part": "wall"
+                    },
+                    {
+                      "type": "tile_is",
+                      "layer": "terreno",
+                      "tile": "chao"
+                    }
+                  ]
+                }
+              }
+            ],
+            "cost": "blocked"
+          },
+          {
+            "where": [
+              {
+                "type": "in_object",
+                "layer": "salas",
+                "part": "wall"
+              }
+            ],
+            "cost": 10
+          },
+          {
+            "where": [
+              {
+                "type": "tile_is",
+                "layer": "terreno",
+                "tile": "chao"
+              }
+            ],
+            "cost": 1
+          },
+          {
+            "where": [],
+            "cost": 2
+          }
+        ],
+        "turn": 1
       }
     },
     {
@@ -146,6 +236,105 @@
           "type": "tile_is",
           "layer": "terreno",
           "tile": "chao"
+        },
+        {
+          "type": "any",
+          "conditions": [
+            {
+              "type": "all",
+              "conditions": [
+                {
+                  "type": "offset",
+                  "x": -1,
+                  "condition": {
+                    "type": "tile_is",
+                    "layer": "terreno",
+                    "tile": "chao"
+                  }
+                },
+                {
+                  "type": "offset",
+                  "x": 1,
+                  "condition": {
+                    "type": "tile_is",
+                    "layer": "terreno",
+                    "tile": "chao"
+                  }
+                },
+                {
+                  "type": "not",
+                  "condition": {
+                    "type": "offset",
+                    "y": -1,
+                    "condition": {
+                      "type": "tile_is",
+                      "layer": "terreno",
+                      "tile": "chao"
+                    }
+                  }
+                },
+                {
+                  "type": "not",
+                  "condition": {
+                    "type": "offset",
+                    "y": 1,
+                    "condition": {
+                      "type": "tile_is",
+                      "layer": "terreno",
+                      "tile": "chao"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "all",
+              "conditions": [
+                {
+                  "type": "offset",
+                  "y": -1,
+                  "condition": {
+                    "type": "tile_is",
+                    "layer": "terreno",
+                    "tile": "chao"
+                  }
+                },
+                {
+                  "type": "offset",
+                  "y": 1,
+                  "condition": {
+                    "type": "tile_is",
+                    "layer": "terreno",
+                    "tile": "chao"
+                  }
+                },
+                {
+                  "type": "not",
+                  "condition": {
+                    "type": "offset",
+                    "x": -1,
+                    "condition": {
+                      "type": "tile_is",
+                      "layer": "terreno",
+                      "tile": "chao"
+                    }
+                  }
+                },
+                {
+                  "type": "not",
+                  "condition": {
+                    "type": "offset",
+                    "x": 1,
+                    "condition": {
+                      "type": "tile_is",
+                      "layer": "terreno",
+                      "tile": "chao"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
         }
       ]
     },

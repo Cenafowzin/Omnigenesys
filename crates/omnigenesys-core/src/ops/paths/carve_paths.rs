@@ -4,13 +4,16 @@ use serde::Deserialize;
 use crate::{
     access::{ReadHandle, WriteHandle},
     bounds::Bounds,
-    condition::CompiledCondition,
+    condition::{CompiledCondition, Condition},
     coords::Coord,
     filter::{CompiledFilter, ObjectFilter, Scene, Subject},
+    mask::CellMask,
     object::{Object, Value},
     operator::{
-        BuildContext, BuildError, Context, Dimensions, OpError, Operator, OperatorType, Scope,
+        BuildContext, BuildError, Context, Dimensions, GridView, OpError, Operator, OperatorType,
+        Scope,
     },
+    pathfinding::{BLOCKED, cheapest_path},
     rng::{StepRng, pick},
     tile::TileId,
 };
@@ -24,6 +27,14 @@ use crate::{
 ///   flip (Wolverson's tutorial).
 /// - `z`: along the longer axis, turning once at a random spot across
 ///   (Rogue's `conn`).
+/// - `cheapest`: the walk that costs least (A*), side to side. A cell
+///   costs what the first rule of `costs` whose conditions all hold there
+///   says, a number or `"blocked"`, and 1 where none does; `turn` is added
+///   at each bend. The costs are worked out again after each path, so the
+///   next one sees it: a cheap rule on the path's tile makes paths share
+///   corridors (vazgriz), an expensive one on walls makes a path cross a
+///   wall once instead of running along it — pesquisa
+///   2026-10-26-portas-e-astar.
 ///
 /// A path crosses whatever is in the way, rooms too: a wall it goes
 /// through is where a door goes (`Fill` with `in_object {wall}` and the
@@ -47,6 +58,36 @@ pub struct CarvePathsConfig {
     /// Which connections get a path.
     #[serde(rename = "where", default)]
     pub filter: Vec<ObjectFilter>,
+    /// `cheapest` only: what walking into a cell costs, by rules in order.
+    #[serde(default)]
+    pub costs: Vec<CostRule>,
+    /// `cheapest` only: added at each bend (0 to 1000, default 0).
+    #[serde(default)]
+    #[schemars(range(max = 1000))]
+    pub turn: Option<u32>,
+}
+
+/// Cells where all of `where` holds cost `cost`.
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CostRule {
+    #[serde(rename = "where")]
+    pub conditions: Vec<Condition>,
+    pub cost: Cost,
+}
+
+/// A whole number from 1 to 10000, or `"blocked"`: never walked into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(untagged, expecting = "a number from 1 to 10000, or \"blocked\"")]
+pub enum Cost {
+    Cells(u32),
+    Word(Blocked),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Blocked {
+    Blocked,
 }
 
 fn one() -> u32 {
@@ -59,6 +100,7 @@ pub enum Shape {
     #[default]
     L,
     Z,
+    Cheapest,
 }
 
 pub struct CarvePaths {
@@ -70,6 +112,8 @@ pub struct CarvePaths {
     width: u32,
     filter: CompiledFilter,
     when: Option<CompiledCondition>,
+    costs: Vec<(CompiledCondition, u32)>,
+    turn: u32,
 }
 
 impl OperatorType for CarvePaths {
@@ -91,6 +135,36 @@ impl OperatorType for CarvePaths {
                 message: "the objects the connections join are in a layer of their own".into(),
             });
         }
+        if c.shape != Shape::Cheapest && (c.turn.is_some() || !c.costs.is_empty()) {
+            let field = if c.turn.is_some() { "turn" } else { "costs" };
+            return Err(BuildError::Invalid {
+                field: field.into(),
+                message: "only a `cheapest` path has costs and turns".into(),
+            });
+        }
+        if let Some(turn) = c.turn.filter(|t| *t > 1000) {
+            return Err(BuildError::Invalid {
+                field: "turn".into(),
+                message: format!("{turn} is above 1000"),
+            });
+        }
+        let mut costs = Vec::new();
+        for (i, rule) in c.costs.iter().enumerate() {
+            let cost = match rule.cost {
+                Cost::Cells(n) if (1..=10_000).contains(&n) => n,
+                Cost::Cells(n) => {
+                    return Err(BuildError::Invalid {
+                        field: "costs".into(),
+                        message: format!("rule {i}: a cost of {n} is not between 1 and 10000"),
+                    });
+                }
+                Cost::Word(Blocked::Blocked) => BLOCKED,
+            };
+            let all = Condition::All {
+                conditions: rule.conditions.clone(),
+            };
+            costs.push((bcx.condition(&all)?, cost));
+        }
         let connections = bcx.read_objects(&c.connections)?;
         // Declares the layers it looks into, too.
         let filter = bcx.filter("where", &c.filter, connections.layer())?;
@@ -103,6 +177,8 @@ impl OperatorType for CarvePaths {
             width: c.width,
             filter,
             when: bcx.step_conditions(),
+            costs,
+            turn: c.turn.unwrap_or(0),
         })
     }
 }
@@ -158,8 +234,52 @@ impl CarvePaths {
                     line(&mut cells, Coord::new(b.x, t, a.z), b);
                 }
             }
+            Shape::Cheapest => unreachable!("walked over the costs, in `execute`"),
         }
         cells
+    }
+
+    /// What walking into each cell of the region costs, from the rules, on
+    /// the grid as it is now.
+    fn costs(&self, grid: &GridView<'_>) -> Result<Vec<u32>, OpError> {
+        let region = grid.region();
+        // 0: no rule has said yet.
+        let mut cost = vec![0; region.size.len()];
+        for (rule, c) in &self.costs {
+            let holds = grid.prepare(rule)?.eval(region);
+            for (k, p) in region.iter().enumerate() {
+                if cost[k] == 0 && holds.get(p) {
+                    cost[k] = *c;
+                }
+            }
+        }
+        cost.iter_mut().filter(|c| **c == 0).for_each(|c| *c = 1);
+        Ok(cost)
+    }
+
+    /// Writes the tile over `cells`, `width` across, where `mask` lets it.
+    fn brush(
+        &self,
+        grid: &mut GridView<'_>,
+        cells: &[Coord],
+        mask: Option<&CellMask>,
+    ) -> Result<(), OpError> {
+        let tiles = grid.tiles_mut(self.layer)?;
+        let w = self.width as i32;
+        let lo = -(w - 1) / 2;
+        for c in cells {
+            for dy in lo..lo + w {
+                for dx in lo..lo + w {
+                    let p = Coord::new(c.x + dx, c.y + dy, c.z);
+                    if mask.is_none_or(|m| m.get(p)) {
+                        // Outside the layer: the brush hangs off the
+                        // edge, nothing to write.
+                        let _ = tiles.set(p, self.tile);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -181,7 +301,7 @@ impl Operator for CarvePaths {
                 reads.push(ReadHandle { layer: l });
             }
         }
-        let mut split = grid.split(&reads, &[self.layer])?;
+        let split = grid.split(&reads, &[])?;
         let scene = Scene::new(
             map,
             reads
@@ -209,30 +329,30 @@ impl Operator for CarvePaths {
                 })?;
             Ok(centre(o.bbox))
         };
-        let mut paths = Vec::new();
+        let mut ends = Vec::new();
         for (i, c) in scene.objects(id).iter().enumerate() {
             if !self.filter.test(&scene, id, Subject::Object(i)) {
                 continue;
             }
-            paths.push(self.path(end(c, "from")?, end(c, "to")?, rng));
+            ends.push((c.id, end(c, "from")?, end(c, "to")?));
         }
+        drop(split);
 
-        let tiles = split.writes[0].as_tiles_mut().expect("checked when built");
-        let w = self.width as i32;
-        let lo = -(w - 1) / 2;
-        for cells in paths {
-            for c in cells {
-                for dy in lo..lo + w {
-                    for dx in lo..lo + w {
-                        let p = Coord::new(c.x + dx, c.y + dy, c.z);
-                        if mask.as_ref().is_none_or(|m| m.get(p)) {
-                            // Outside the layer: the brush hangs off the
-                            // edge, nothing to write.
-                            let _ = tiles.set(p, self.tile);
-                        }
+        for (id, a, b) in ends {
+            let cells = if self.shape == Shape::Cheapest {
+                let cost = self.costs(&grid)?;
+                cheapest_path(grid.region(), &cost, self.turn, a, b).ok_or_else(|| {
+                    OpError::Failed {
+                        message: format!(
+                            "connection {id:?}: blocked cells cut ({}, {}) off from ({}, {})",
+                            a.x, a.y, b.x, b.y
+                        ),
                     }
-                }
-            }
+                })?
+            } else {
+                self.path(a, b, rng)
+            };
+            self.brush(&mut grid, &cells, mask.as_ref())?;
         }
         Ok(())
     }

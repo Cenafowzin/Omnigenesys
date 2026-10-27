@@ -17,6 +17,7 @@ pub mod noise;
 pub mod object;
 pub mod operator;
 pub mod ops;
+pub mod pathfinding;
 pub mod pipeline;
 pub mod rng;
 pub mod spec;

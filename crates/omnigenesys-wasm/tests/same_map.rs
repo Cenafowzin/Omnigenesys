@@ -102,7 +102,7 @@ fn isaac_floor() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn classic_dungeon() {
-    assert_eq!(fingerprint(DUNGEON), 13_739_547_911_115_165_523);
+    assert_eq!(fingerprint(DUNGEON), 3_896_116_917_395_450_132);
 }
 
 /// A deep floor (stage 6: 20 rooms, growth reseeded from the start) made

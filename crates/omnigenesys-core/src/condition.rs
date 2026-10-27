@@ -25,6 +25,21 @@ enum Prepared {
     Any(Vec<Prepared>),
     All(Vec<Prepared>),
     Not(Box<Prepared>),
+    /// `inner` at the cell `by` away, false past the edge of `map`.
+    Offset {
+        by: [i32; 3],
+        map: Bounds,
+        inner: Box<Prepared>,
+    },
+    /// How many of the cells `around` away pass `inner` is in
+    /// `min..=max`; cells past the edge of `map` pass nothing.
+    Neighbors {
+        around: Vec<[i32; 3]>,
+        map: Bounds,
+        inner: Box<Prepared>,
+        min: u32,
+        max: u32,
+    },
     /// The four distance conditions: true when the number of matching cells
     /// in the box around the cell is in `min..=max`.
     Window {
@@ -82,6 +97,16 @@ enum Compiled {
     Any(Vec<Compiled>),
     All(Vec<Compiled>),
     Not(Box<Compiled>),
+    Offset {
+        by: [i32; 3],
+        inner: Box<Compiled>,
+    },
+    Neighbors {
+        around: Vec<[i32; 3]>,
+        inner: Box<Compiled>,
+        min: u32,
+        max: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +191,71 @@ pub enum Condition {
     Not {
         condition: Box<Condition>,
     },
+    /// `condition`, tested on the cell `x`, `y`, `z` away instead of the
+    /// cell itself: "the cell to the left is floor" is `x: -1` around a
+    /// `tile_is`. Several of them make a pattern, as in Tiled's automapping
+    /// and LDtk's rules. A cell past the edge of the map passes nothing,
+    /// so there `offset` is false and `not offset` is true: the edge counts
+    /// as "not floor", "not wall", not anything.
+    Offset {
+        #[serde(default)]
+        x: i32,
+        #[serde(default)]
+        y: i32,
+        #[serde(default)]
+        z: i32,
+        condition: Box<Condition>,
+    },
+    /// How many of the cell's neighbours pass `condition` is from `min` to
+    /// `max` (both counted; either may be left out): "next to an opening"
+    /// is `min: 1`, "touching no room" is `max: 0`, the birth rule of a
+    /// cellular automaton over any condition. `shape` says which
+    /// neighbours: the `sides` (4 in 2D, 6 in 3D) or `all` the cells
+    /// around (8 in 2D, 26 in 3D). The cell itself is not one. Past the
+    /// edge of the map a neighbour passes nothing, as in `offset`.
+    Neighbors {
+        #[serde(default)]
+        shape: Neighborhood,
+        condition: Box<Condition>,
+        #[serde(default)]
+        min: Option<u32>,
+        #[serde(default)]
+        max: Option<u32>,
+    },
+}
+
+/// Which cells are a cell's neighbours.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Neighborhood {
+    /// One step along one axis (von Neumann).
+    #[default]
+    Sides,
+    /// Every cell of the 3×3 (or 3×3×3) box around it (Moore).
+    All,
+}
+
+impl Neighborhood {
+    /// The steps to each neighbour, in x, then y, then z order.
+    fn steps(self, is_2d: bool) -> Vec<[i32; 3]> {
+        let zs: &[i32] = if is_2d { &[0] } else { &[-1, 0, 1] };
+        let mut out = Vec::new();
+        for &z in zs {
+            for y in -1i32..=1 {
+                for x in -1i32..=1 {
+                    let away = x.abs() + y.abs() + z.abs();
+                    let counts = match self {
+                        Neighborhood::Sides => away == 1,
+                        Neighborhood::All => away > 0,
+                    };
+                    if counts {
+                        out.push([x, y, z]);
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 /// Which cells of an object's box: all, the outer ring, or the rest.
@@ -200,6 +290,14 @@ pub enum ConditionError {
     TooManyCellsToCount { cells: usize },
     #[error("in_object: {0}")]
     Filter(#[from] FilterError),
+    #[error("offset: z is {z}, but the map is 2D (no cell is another z away)")]
+    OffsetInZOn2d { z: i32 },
+    #[error("neighbors needs at least one of `min` or `max`")]
+    NeighborsWithNoBounds,
+    #[error("neighbors range is empty: min {min} > max {max}")]
+    EmptyNeighborsRange { min: u32, max: u32 },
+    #[error("neighbors: min is {min}, but a cell has only {count} of these neighbours")]
+    MoreNeighborsThanThereAre { min: u32, count: usize },
 }
 
 /// Entry `(x, y, z)` counts the matches in the local box `[0, x) × [0, y) × [0, z]`.
@@ -409,6 +507,34 @@ fn reads(c: &Compiled, out: &mut Vec<(LayerId, Reach)>) {
         }
         Compiled::Any(cs) | Compiled::All(cs) => cs.iter().for_each(|c| reads(c, out)),
         Compiled::Not(c) => reads(c, out),
+        // What the inner condition reads around the shifted cell, seen
+        // from the cell: `x: -1` reads one more cell below in x, and
+        // `x: 3` past a reach of 1 below reads nothing below.
+        Compiled::Offset { by, inner } => {
+            let mut inside = Vec::new();
+            reads(inner, &mut inside);
+            out.extend(inside.into_iter().map(|(layer, r)| (layer, shift(r, *by))));
+        }
+        // The inner reads around each neighbour, all together.
+        Compiled::Neighbors { around, inner, .. } => {
+            let mut inside = Vec::new();
+            reads(inner, &mut inside);
+            out.extend(inside.into_iter().map(|(layer, r)| {
+                let all = around
+                    .iter()
+                    .fold(Reach::ZERO, |all, by| all.union(shift(r, *by)));
+                (layer, all)
+            }));
+        }
+    }
+}
+
+/// `r` read from a cell `by` away, seen from the cell.
+fn shift(r: Reach, by: [i32; 3]) -> Reach {
+    let side = |reach: u32, d: i64| (i64::from(reach) + d).clamp(0, i64::from(u32::MAX)) as u32;
+    Reach {
+        below: std::array::from_fn(|a| side(r.below[a], -i64::from(by[a]))),
+        above: std::array::from_fn(|a| side(r.above[a], i64::from(by[a]))),
     }
 }
 
@@ -460,6 +586,65 @@ fn eval(p: &Prepared, region: Bounds) -> CellMask {
             m
         }),
         Prepared::Not(p) => !eval(p, region),
+        Prepared::Offset { by, map, inner } => {
+            let mut w = MaskWriter::new(region);
+            match shifted(region.origin, *by) {
+                Some(origin) => {
+                    let m = eval(inner, Bounds::new(origin, region.size));
+                    for c in region.iter() {
+                        let s = shifted(c, *by).expect("inside the shifted region");
+                        w.push(map.contains(s) && m.get(s));
+                    }
+                }
+                // Past the coordinates themselves: past the map too.
+                None => region.iter().for_each(|_| w.push(false)),
+            }
+            w.finish()
+        }
+        Prepared::Neighbors {
+            around,
+            map,
+            inner,
+            min,
+            max,
+        } => {
+            let mut w = MaskWriter::new(region);
+            // The inner condition once, over the region and one cell
+            // around it, instead of once per neighbour.
+            let dz = i32::from(around.iter().any(|by| by[2] != 0));
+            let wide = (|| {
+                let o = region.origin;
+                let origin = Coord::new(
+                    o.x.checked_sub(1)?,
+                    o.y.checked_sub(1)?,
+                    o.z.checked_sub(dz)?,
+                );
+                let s = region.size;
+                let size = crate::coords::GridSize::new(
+                    s.width.checked_add(2)?,
+                    s.height.checked_add(2)?,
+                    s.depth.checked_add(2 * dz as u32)?,
+                );
+                Some(Bounds::new(origin, size))
+            })();
+            match wide {
+                Some(wide) => {
+                    let m = eval(inner, wide);
+                    for c in region.iter() {
+                        let n = around
+                            .iter()
+                            .filter(|by| {
+                                shifted(c, **by).is_some_and(|s| map.contains(s) && m.get(s))
+                            })
+                            .count();
+                        w.push((*min as usize..=*max as usize).contains(&n));
+                    }
+                }
+                // At the very end of the coordinates: one cell at a time.
+                None => region.iter().for_each(|c| w.push(test(p, c))),
+            }
+            w.finish()
+        }
         Prepared::Window {
             sums,
             radius,
@@ -482,6 +667,22 @@ fn test(p: &Prepared, c: Coord) -> bool {
         Prepared::Any(ps) => ps.iter().any(|p| test(p, c)),
         Prepared::All(ps) => ps.iter().all(|p| test(p, c)),
         Prepared::Not(p) => !test(p, c),
+        Prepared::Offset { by, map, inner } => {
+            shifted(c, *by).is_some_and(|s| map.contains(s) && test(inner, s))
+        }
+        Prepared::Neighbors {
+            around,
+            map,
+            inner,
+            min,
+            max,
+        } => {
+            let n = around
+                .iter()
+                .filter(|by| shifted(c, **by).is_some_and(|s| map.contains(s) && test(inner, s)))
+                .count();
+            (*min as usize..=*max as usize).contains(&n)
+        }
         Prepared::Window {
             sums,
             radius,
@@ -489,6 +690,16 @@ fn test(p: &Prepared, c: Coord) -> bool {
             max,
         } => (*min..=*max).contains(&u64::from(sums.count(c, *radius))),
     }
+}
+
+/// `c` moved `by`, if the coordinates can hold it.
+#[inline]
+fn shifted(c: Coord, by: [i32; 3]) -> Option<Coord> {
+    Some(Coord::new(
+        c.x.checked_add(by[0])?,
+        c.y.checked_add(by[1])?,
+        c.z.checked_add(by[2])?,
+    ))
 }
 
 fn prepare(c: &Compiled, grid: &Grid) -> Result<Prepared, ConditionError> {
@@ -514,6 +725,23 @@ fn prepare(c: &Compiled, grid: &Grid) -> Result<Prepared, ConditionError> {
         Compiled::Any(cs) => Prepared::Any(prepare_all(cs, grid)?),
         Compiled::All(cs) => Prepared::All(prepare_all(cs, grid)?),
         Compiled::Not(c) => Prepared::Not(Box::new(prepare(c, grid)?)),
+        Compiled::Offset { by, inner } => Prepared::Offset {
+            by: *by,
+            map: grid.map(),
+            inner: Box::new(prepare(inner, grid)?),
+        },
+        Compiled::Neighbors {
+            around,
+            inner,
+            min,
+            max,
+        } => Prepared::Neighbors {
+            around: around.clone(),
+            map: grid.map(),
+            inner: Box::new(prepare(inner, grid)?),
+            min: *min,
+            max: *max,
+        },
         Compiled::NearType {
             layer,
             tiles,
@@ -715,6 +943,42 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
         Condition::Any { conditions } => Compiled::Any(compile_all(conditions, grid, tiles)?),
         Condition::All { conditions } => Compiled::All(compile_all(conditions, grid, tiles)?),
         Condition::Not { condition } => Compiled::Not(Box::new(compile(condition, grid, tiles)?)),
+        Condition::Offset { x, y, z, condition } => {
+            if *z != 0 && grid.bounds().size.is_2d() {
+                return Err(ConditionError::OffsetInZOn2d { z: *z });
+            }
+            Compiled::Offset {
+                by: [*x, *y, *z],
+                inner: Box::new(compile(condition, grid, tiles)?),
+            }
+        }
+        Condition::Neighbors {
+            shape,
+            condition,
+            min,
+            max,
+        } => {
+            let around = shape.steps(grid.bounds().size.is_2d());
+            let (min, max) = match (*min, *max) {
+                (None, None) => return Err(ConditionError::NeighborsWithNoBounds),
+                (Some(min), Some(max)) if min > max => {
+                    return Err(ConditionError::EmptyNeighborsRange { min, max });
+                }
+                (Some(min), _) if min as usize > around.len() => {
+                    return Err(ConditionError::MoreNeighborsThanThereAre {
+                        min,
+                        count: around.len(),
+                    });
+                }
+                (min, max) => (min.unwrap_or(0), max.unwrap_or(u32::MAX)),
+            };
+            Compiled::Neighbors {
+                around,
+                inner: Box::new(compile(condition, grid, tiles)?),
+                min,
+                max,
+            }
+        }
     })
 }
 

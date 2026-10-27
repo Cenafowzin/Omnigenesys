@@ -124,6 +124,64 @@ fn scatter_and_fill() {
     );
 }
 
+/// A pattern of cells a few steps away, across chunk borders and at the
+/// map's edge (where `offset` is false).
+#[test]
+fn offset_reads_past_the_chunk() {
+    agrees(
+        "offset",
+        &[
+            step(
+                "ruido",
+                "Scatter",
+                json!({"layer": "terreno", "tile": "parede", "chance": 0.45}),
+                json!([]),
+            ),
+            step(
+                "padrao",
+                "Fill",
+                json!({"layer": "terreno", "tile": "chao"}),
+                json!([
+                    {"type": "offset", "x": 3, "condition": {"type": "tile_is", "layer": "terreno", "tile": "parede"}},
+                    {"type": "not", "condition": {"type": "offset", "x": -2, "y": -1,
+                        "condition": {"type": "tile_is", "layer": "terreno", "tile": "parede"}}}
+                ]),
+            ),
+        ],
+        // The steps declare x 2 below, 3 above, y 1 below.
+        3,
+    );
+}
+
+/// Neighbours counted across chunk borders and at the map's edge, around
+/// a condition that itself reads a step away.
+#[test]
+fn neighbors_read_past_the_chunk() {
+    agrees(
+        "neighbors",
+        &[
+            step(
+                "ruido",
+                "Scatter",
+                json!({"layer": "terreno", "tile": "parede", "chance": 0.45}),
+                json!([]),
+            ),
+            step(
+                "padrao",
+                "Fill",
+                json!({"layer": "terreno", "tile": "chao"}),
+                json!([
+                    {"type": "neighbors", "shape": "all", "min": 3, "max": 5,
+                        "condition": {"type": "offset", "x": 2, "condition":
+                            {"type": "tile_is", "layer": "terreno", "tile": "parede"}}}
+                ]),
+            ),
+        ],
+        // x 1 below, 3 above; y 1 on each side.
+        3,
+    );
+}
+
 #[test]
 fn border_uses_the_maps_edge() {
     agrees(

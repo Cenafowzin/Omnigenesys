@@ -148,3 +148,121 @@ fn a_connection_must_name_objects_of_objects() {
     let e = build(&p).err().unwrap();
     assert_eq!(e[0].pointer, "/steps/4/config/width");
 }
+
+/// Rooms A and B diagonal from each other: the cheapest walk with walls
+/// costing 10 goes through one wall cell of each and never a corner.
+#[test]
+fn a_cheapest_path_crosses_each_wall_once() {
+    let costs =
+        json!([{"where": [{"type": "in_object", "layer": "salas", "part": "wall"}], "cost": 10}]);
+    for turn in [0, 4] {
+        let rows = run(&pipeline(
+            1,
+            carve(json!({"shape": "cheapest", "costs": costs, "turn": turn})),
+            json!([]),
+        ))
+        .unwrap();
+        let open = |x: i32, y: i32| rows[y as usize].as_bytes()[x as usize] == b'#';
+        assert!(open(4, 3) && open(13, 10));
+        // Room A is x 0..=8, y 0..=6; room B x 9..=17, y 7..=13.
+        let ring = |x: i32, y: i32| {
+            let on = |x0: i32, y0: i32| {
+                (x0..=x0 + 8).contains(&x)
+                    && (y0..=y0 + 6).contains(&y)
+                    && (x == x0 || x == x0 + 8 || y == y0 || y == y0 + 6)
+            };
+            on(0, 0) || on(9, 7)
+        };
+        let walls: Vec<(i32, i32)> = (0..20)
+            .flat_map(|y| (0..40).map(move |x| (x, y)))
+            .filter(|&(x, y)| open(x, y) && ring(x, y))
+            .collect();
+        assert_eq!(
+            walls.len(),
+            2,
+            "turn {turn}: {walls:?}\n{}",
+            rows.join("\n")
+        );
+    }
+}
+
+/// The costs are worked out again after each path: with the path's tile
+/// cheap, the second path walks along the first.
+#[test]
+fn a_later_path_sees_the_earlier_ones() {
+    let mut p = pipeline(
+        0,
+        carve(json!({"shape": "cheapest", "costs": [
+            {"where": [{"type": "tile_is", "layer": "terreno", "tile": "chao"}], "cost": 1},
+            {"where": [], "cost": 5}]})),
+        json!([]),
+    );
+    // A 3 × 3 lattice of 9 × 6 cells: A at (0, 0), B at (2, 0), C at (1, 2),
+    // joined in the order they were made: A–B, then B–C.
+    p["layers"][1]["lattice"] = json!({"columns": 3, "rows": 3, "cell": {"width": 9, "height": 6}, "origin": {"x": 0, "y": 0}});
+    p["steps"][2]["config"]["where"] = json!([{"type": "slot", "x": 2, "y": 0}]);
+    let c = json!({"id": "c2", "operator": "PlaceObjects", "config": {
+        "layer": "salas", "kind": "sala", "where": [{"type": "slot", "x": 1, "y": 2}]}});
+    p["steps"].as_array_mut().unwrap().insert(3, c);
+    p["steps"][4]["config"]["strategy"] = json!("chain");
+    let rows = run(&p).unwrap();
+    let open = |x: usize, y: usize| rows[y].as_bytes()[x] == b'#';
+    // A–B: the row of the middles, (4, 3) to (22, 3).
+    assert!((4..=22).all(|x| open(x, 3)));
+    // B–C, (22, 3) to (13, 15): back along A–B, then down.
+    assert!((4..=15).all(|y| open(13, y)), "\n{}", rows.join("\n"));
+    assert!(!open(22, 4) && !open(14, 15));
+    assert_eq!(
+        rows.iter().map(|r| r.matches('#').count()).sum::<usize>(),
+        19 + 12
+    );
+}
+
+#[test]
+fn cheapest_fails_when_blocked_cells_cut_the_ends_apart() {
+    // Rooms that touch only at a corner, and nothing outside them walkable.
+    let costs = json!([{"where": [{"type": "not", "condition": {"type": "in_object", "layer": "salas"}}], "cost": "blocked"}]);
+    let e = run(&pipeline(
+        1,
+        carve(json!({"shape": "cheapest", "costs": costs})),
+        json!([]),
+    ))
+    .unwrap_err();
+    assert!(
+        e.contains("blocked cells cut (4, 3) off from (13, 10)"),
+        "{e}"
+    );
+}
+
+#[test]
+fn costs_and_turns_belong_to_cheapest_paths() {
+    let pointer = |extra: Json| {
+        let p = pipeline(0, carve(extra), json!([]));
+        build(&p).err().unwrap()[0].pointer.clone()
+    };
+    let wall = json!([{"where": [], "cost": 3}]);
+    assert_eq!(pointer(json!({"costs": wall})), "/steps/4/config/costs");
+    assert_eq!(
+        pointer(json!({"shape": "z", "turn": 2})),
+        "/steps/4/config/turn"
+    );
+    assert_eq!(
+        pointer(json!({"shape": "cheapest", "turn": 1001})),
+        "/steps/4/config/turn"
+    );
+    let p = pipeline(
+        0,
+        carve(json!({"shape": "cheapest", "costs": [{"where": [], "cost": 0}]})),
+        json!([]),
+    );
+    let e = &build(&p).err().unwrap()[0];
+    assert_eq!(e.pointer, "/steps/4/config/costs");
+    assert!(e.message.contains("rule 0: a cost of 0"), "{}", e.message);
+    let p = pipeline(
+        0,
+        carve(json!({"shape": "cheapest", "costs": [{"where": [], "cost": "blockd"}]})),
+        json!([]),
+    );
+    let e = &build(&p).err().unwrap()[0];
+    assert!(e.message.contains("or \"blocked\""), "{}", e.message);
+}
