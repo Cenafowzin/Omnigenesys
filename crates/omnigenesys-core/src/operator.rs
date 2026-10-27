@@ -586,15 +586,36 @@ impl GridView<'_> {
         Ok(self.grid.scalars_and_tiles_mut(read.layer, write.layer)?)
     }
 
-    /// A snapshot of what the condition reads, taken now.
+    /// A snapshot of what the condition reads, taken now. Fails if the
+    /// step did not declare those reads, as far around as the condition
+    /// reaches: a condition compiled outside the [`BuildContext`] would
+    /// read past a chunk's padding without a word.
     pub fn prepare(&self, c: &CompiledCondition) -> Result<PreparedCondition, OpError> {
+        self.declared(c)?;
         Ok(c.prepare(self.grid)?)
     }
 
     /// The filter, with the cells its `cells` filters look at taken now:
     /// before the step writes, as the step's conditions.
     pub fn prepare_filter<'f>(&self, f: &'f CompiledFilter) -> Result<PreparedFilter<'f>, OpError> {
+        for c in f.conditions() {
+            self.declared(c)?;
+        }
         Ok(f.prepare(self.grid)?)
+    }
+
+    /// Whether the step declared every read of `c`, as far around.
+    fn declared(&self, c: &CompiledCondition) -> Result<(), OpError> {
+        for (layer, reach) in c.reads() {
+            let covered = self
+                .access
+                .read_reach(layer)
+                .is_some_and(|d| d.union(reach) == d);
+            if !covered {
+                return Err(OpError::Undeclared { layer });
+            }
+        }
+        Ok(())
     }
 
     /// Where the step's conditions hold in the region, taken now — before

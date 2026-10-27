@@ -460,6 +460,42 @@ impl PipelineSpec {
         })
     }
 
+    /// Steps that read a layer no earlier step writes: they see it empty,
+    /// which is rarely what was meant (a step moved above the one it
+    /// depends on). Warnings, not errors: reading `empty` on purpose is
+    /// allowed. `built` is this spec, built.
+    pub fn unwritten_reads(&self, built: &Built) -> Vec<Diagnostic> {
+        let mut written = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for (i, s) in self.steps.iter().enumerate().filter(|(_, s)| s.enabled) {
+            let Some(access) = built.pipeline.access(&s.id) else {
+                continue;
+            };
+            for l in access.layers() {
+                if access.read_reach(l.layer).is_some() && !written.contains(&l.layer) {
+                    let name = built.grid.layer_name(l.layer).unwrap_or("?");
+                    let mut d = Diagnostic::new(
+                        format!("/steps/{i}"),
+                        format!(
+                            "reads layer '{name}', but no step before it writes there: \
+                             it is still empty"
+                        ),
+                    );
+                    d.step_id = Some(s.id.clone());
+                    out.push(d);
+                }
+            }
+            written.extend(
+                access
+                    .layers()
+                    .iter()
+                    .filter(|l| l.write.is_some())
+                    .map(|l| l.layer),
+            );
+        }
+        self.origin.finish(out)
+    }
+
     /// Places a build error inside its step, as precisely as the error
     /// allows.
     fn step_diagnostic(&self, e: StepError<BuildError>) -> Diagnostic {

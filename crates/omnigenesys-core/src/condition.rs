@@ -56,27 +56,14 @@ enum Compiled {
         layer: LayerId,
         tiles: Vec<TileId>,
     },
-    NearType {
-        layer: LayerId,
-        tiles: Vec<TileId>,
-        radius: Radius,
-    },
-    NotNearType {
-        layer: LayerId,
-        tiles: Vec<TileId>,
-        radius: Radius,
-    },
-    AreaIs {
-        layer: LayerId,
-        tiles: Vec<TileId>,
-        radius: Radius,
-    },
+    /// Every distance condition: `near_type`, `not_near_type` and
+    /// `area_is` are counts with fixed bounds.
     Count {
         layer: LayerId,
         tiles: Vec<TileId>,
         radius: Radius,
-        min: u32,
-        max: u32,
+        min: u64,
+        max: u64,
     },
     /// `min <= value < max` in a scalar layer; NaN never holds.
     ScalarInRange {
@@ -126,25 +113,39 @@ pub enum TileSpec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Condition {
-    TileIs {
-        layer: String,
-        tile: TileSpec,
-    },
+    /// The cell's tile in `layer` is `tile`, or one of the list: "is floor",
+    /// `["grass", "sand"]` for "is land".
+    TileIs { layer: String, tile: TileSpec },
+    /// A shortcut for `count` with `min: 1`: some cell in the box of
+    /// `distance` cells around the cell (the cell too) is `tile`. "Near
+    /// water". The box is a square (a cube in 3D, where it reaches up and
+    /// down too), not a circle; past the map's edge nothing matches.
     NearType {
         layer: String,
         tile: TileSpec,
         distance: u32,
     },
+    /// A shortcut for `count` with `max: 0`: no cell in the box of
+    /// `distance` around the cell is `tile`. "Away from lava". Past the
+    /// map's edge nothing matches, so the edge counts as away.
     NotNearType {
         layer: String,
         tile: TileSpec,
         distance: u32,
     },
+    /// A shortcut for `count` with every cell of the box: all of the box
+    /// of `distance` around the cell is `tile`. "Room for a 3 × 3 house"
+    /// is `distance: 1`. The cells past the map's edge are not `tile`, so
+    /// less than `distance` from the edge it never holds.
     AreaIs {
         layer: String,
         tile: TileSpec,
         distance: u32,
     },
+    /// How many cells of the box of `distance` around the cell (the cell
+    /// too) are `tile`: from `min` to `max`, both counted, either may be
+    /// left out. A square box (a cube in 3D); past the map's edge nothing
+    /// matches.
     Count {
         layer: String,
         tile: TileSpec,
@@ -182,15 +183,13 @@ pub enum Condition {
         #[serde(rename = "where", default)]
         filter: Vec<ObjectFilter>,
     },
-    Any {
-        conditions: Vec<Condition>,
-    },
-    All {
-        conditions: Vec<Condition>,
-    },
-    Not {
-        condition: Box<Condition>,
-    },
+    /// At least one of `conditions` holds; at least one is given.
+    Any { conditions: Vec<Condition> },
+    /// Every one of `conditions` holds; at least one is given. A step's
+    /// `conditions` are an implicit `all`.
+    All { conditions: Vec<Condition> },
+    /// `condition` does not hold.
+    Not { condition: Box<Condition> },
     /// `condition`, tested on the cell `x`, `y`, `z` away instead of the
     /// cell itself: "the cell to the left is floor" is `x: -1` around a
     /// `tile_is`. Several of them make a pattern, as in Tiled's automapping
@@ -298,6 +297,10 @@ pub enum ConditionError {
     EmptyNeighboursRange { min: u32, max: u32 },
     #[error("neighbours: min is {min}, but a cell has only {count} of these neighbours")]
     MoreNeighboursThanThereAre { min: u32, count: usize },
+    #[error("`tile` is an empty list: name at least one tile")]
+    NoTiles,
+    #[error("`{what}` has no conditions: give at least one")]
+    NoConditions { what: &'static str },
 }
 
 /// Entry `(x, y, z)` counts the matches in the local box `[0, x) × [0, y) × [0, z]`.
@@ -499,10 +502,7 @@ fn reads(c: &Compiled, out: &mut Vec<(LayerId, Reach)>) {
             out.push((*layer, Reach::ZERO));
             out.extend(filter.layers().into_iter().map(|l| (l, Reach::ZERO)));
         }
-        Compiled::NearType { layer, radius, .. }
-        | Compiled::NotNearType { layer, radius, .. }
-        | Compiled::AreaIs { layer, radius, .. }
-        | Compiled::Count { layer, radius, .. } => {
+        Compiled::Count { layer, radius, .. } => {
             out.push((*layer, Reach::symmetric(radius.x, radius.y, radius.z)));
         }
         Compiled::Any(cs) | Compiled::All(cs) => cs.iter().for_each(|c| reads(c, out)),
@@ -742,37 +742,13 @@ fn prepare(c: &Compiled, grid: &Grid) -> Result<Prepared, ConditionError> {
             min: *min,
             max: *max,
         },
-        Compiled::NearType {
-            layer,
-            tiles,
-            radius,
-        } => window(grid, *layer, tiles, *radius, 1, u64::MAX)?,
-        Compiled::NotNearType {
-            layer,
-            tiles,
-            radius,
-        } => window(grid, *layer, tiles, *radius, 0, 0)?,
-        // The full box, not the clipped one: near the edge part of the box
-        // is outside the layer, never matches, so the area is not clear.
-        Compiled::AreaIs {
-            layer,
-            tiles,
-            radius,
-        } => window(
-            grid,
-            *layer,
-            tiles,
-            *radius,
-            radius.volume(),
-            radius.volume(),
-        )?,
         Compiled::Count {
             layer,
             tiles,
             radius,
             min,
             max,
-        } => window(grid, *layer, tiles, *radius, (*min).into(), (*max).into())?,
+        } => window(grid, *layer, tiles, *radius, *min, *max)?,
     })
 }
 
@@ -850,33 +826,26 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
             layer: tile_layer(grid, layer)?,
             tiles: resolve_tiles(tile, tiles)?,
         },
+        // The shortcuts, as the counts they are.
         Condition::NearType {
             layer,
             tile,
             distance,
-        } => Compiled::NearType {
-            layer: tile_layer(grid, layer)?,
-            tiles: resolve_tiles(tile, tiles)?,
-            radius: radius(*distance, grid),
-        },
+        } => count(grid, tiles, layer, tile, *distance, |_| (1, u64::MAX))?,
         Condition::NotNearType {
             layer,
             tile,
             distance,
-        } => Compiled::NotNearType {
-            layer: tile_layer(grid, layer)?,
-            tiles: resolve_tiles(tile, tiles)?,
-            radius: radius(*distance, grid),
-        },
+        } => count(grid, tiles, layer, tile, *distance, |_| (0, 0))?,
+        // The full box, not the clipped one: near the edge part of the box
+        // is outside the layer, never matches, so the area is not clear.
         Condition::AreaIs {
             layer,
             tile,
             distance,
-        } => Compiled::AreaIs {
-            layer: tile_layer(grid, layer)?,
-            tiles: resolve_tiles(tile, tiles)?,
-            radius: radius(*distance, grid),
-        },
+        } => count(grid, tiles, layer, tile, *distance, |r| {
+            (r.volume(), r.volume())
+        })?,
         Condition::Count {
             layer,
             tile,
@@ -889,15 +858,9 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
                 (Some(min), Some(max)) if min > max => {
                     return Err(ConditionError::EmptyCountRange { min, max });
                 }
-                (min, max) => (min.unwrap_or(0), max.unwrap_or(u32::MAX)),
+                (min, max) => (min.map_or(0, u64::from), max.map_or(u64::MAX, u64::from)),
             };
-            Compiled::Count {
-                layer: tile_layer(grid, layer)?,
-                tiles: resolve_tiles(tile, tiles)?,
-                radius: radius(*distance, grid),
-                min,
-                max,
-            }
+            count(grid, tiles, layer, tile, *distance, |_| (min, max))?
         }
         Condition::ScalarInRange { layer, min, max } => {
             let (min, max) = match (*min, *max) {
@@ -948,8 +911,12 @@ fn compile(c: &Condition, grid: &Grid, tiles: &TileRegistry) -> Result<Compiled,
                 },
             }
         }
-        Condition::Any { conditions } => Compiled::Any(compile_all(conditions, grid, tiles)?),
-        Condition::All { conditions } => Compiled::All(compile_all(conditions, grid, tiles)?),
+        Condition::Any { conditions } => {
+            Compiled::Any(compile_list("any", conditions, grid, tiles)?)
+        }
+        Condition::All { conditions } => {
+            Compiled::All(compile_list("all", conditions, grid, tiles)?)
+        }
         Condition::Not { condition } => Compiled::Not(Box::new(compile(condition, grid, tiles)?)),
         Condition::Offset { x, y, z, condition } => {
             if *z != 0 && grid.bounds().size.is_2d() {
@@ -1009,15 +976,46 @@ fn kind_layer(grid: &Grid, name: &str, kind: LayerKind) -> Result<LayerId, Condi
     Ok(id)
 }
 
-fn compile_all(
+/// The conditions of an `any` or `all`: an empty one would hold never or
+/// always, which nobody writes on purpose.
+fn compile_list(
+    what: &'static str,
     conditions: &[Condition],
     grid: &Grid,
     tiles: &TileRegistry,
 ) -> Result<Vec<Compiled>, ConditionError> {
+    if conditions.is_empty() {
+        return Err(ConditionError::NoConditions { what });
+    }
     conditions.iter().map(|c| compile(c, grid, tiles)).collect()
 }
 
+/// A count of `tile` in the box of `distance`, with the bounds `bounds`
+/// gives for that box.
+fn count(
+    grid: &Grid,
+    tiles: &TileRegistry,
+    layer: &str,
+    tile: &TileSpec,
+    distance: u32,
+    bounds: impl FnOnce(Radius) -> (u64, u64),
+) -> Result<Compiled, ConditionError> {
+    let radius = radius(distance, grid);
+    let (min, max) = bounds(radius);
+    Ok(Compiled::Count {
+        layer: tile_layer(grid, layer)?,
+        tiles: resolve_tiles(tile, tiles)?,
+        radius,
+        min,
+        max,
+    })
+}
+
+/// The tiles named, at least one. An empty list would match nothing.
 fn resolve_tiles(spec: &TileSpec, tiles: &TileRegistry) -> Result<Vec<TileId>, ConditionError> {
+    if spec.names().is_empty() {
+        return Err(ConditionError::NoTiles);
+    }
     let mut ids = spec
         .names()
         .iter()

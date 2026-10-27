@@ -159,8 +159,13 @@ fn build(
     text: &str,
     spec: &PipelineSpec,
 ) -> Result<Built, Failed> {
-    spec.build(registry)
-        .map_err(|errors| report::errors(path, text, &errors))
+    let built = spec
+        .build(registry)
+        .map_err(|errors| report::errors(path, text, &errors))?;
+    for w in spec.unwritten_reads(&built) {
+        report::print("warning", path, text, &w);
+    }
+    Ok(built)
 }
 
 fn generate(registry: &Registry, g: Generate) -> Result<(), Failed> {

@@ -305,7 +305,7 @@ fn empty_resolves_to_the_reserved_tile() {
         &w,
     )
     .unwrap();
-    let Compiled::AreaIs { tiles, .. } = c else {
+    let Compiled::Count { tiles, .. } = c else {
         panic!("expected AreaIs, got {c:?}");
     };
     assert_eq!(tiles, vec![TileId::EMPTY]);
@@ -320,7 +320,7 @@ fn distance_has_no_z_radius_in_a_2d_map() {
         &w,
     )
     .unwrap();
-    let Compiled::NearType { radius, .. } = c else {
+    let Compiled::Count { radius, .. } = c else {
         panic!("expected NearType, got {c:?}");
     };
     assert_eq!(radius, Radius { x: 3, y: 3, z: 0 });
@@ -334,7 +334,7 @@ fn distance_applies_to_every_axis_in_a_3d_map() {
         &w,
     )
     .unwrap();
-    let Compiled::NotNearType { radius, .. } = c else {
+    let Compiled::Count { radius, .. } = c else {
         panic!("expected NotNearType, got {c:?}");
     };
     assert_eq!(radius, Radius { x: 3, y: 3, z: 3 });
@@ -380,7 +380,7 @@ fn count_json(bounds: &str) -> String {
     format!(r#"{{"type": "count", "layer": "terrain", "tile": "wall", "distance": 1{bounds}}}"#)
 }
 
-fn compiled_count_bounds(bounds: &str) -> Result<(u32, u32), ConditionError> {
+fn compiled_count_bounds(bounds: &str) -> Result<(u64, u64), ConditionError> {
     let w = world_2d();
     compile_json(&count_json(bounds), &w).map(|c| match c {
         Compiled::Count { min, max, .. } => (min, max),
@@ -406,7 +406,7 @@ fn count_with_min_above_max_is_an_error() {
 
 #[test]
 fn count_fills_the_missing_bound_with_its_neutral_value() {
-    assert_eq!(compiled_count_bounds(r#", "min": 5"#), Ok((5, u32::MAX)));
+    assert_eq!(compiled_count_bounds(r#", "min": 5"#), Ok((5, u64::MAX)));
     assert_eq!(compiled_count_bounds(r#", "max": 3"#), Ok((0, 3)));
     assert_eq!(compiled_count_bounds(r#", "min": 4, "max": 4"#), Ok((4, 4)));
 }
@@ -476,17 +476,47 @@ fn an_error_deep_inside_a_combinator_surfaces() {
 }
 
 #[test]
-fn empty_combinators_compile() {
-    // A step with no conditions is an implicit empty All and must be valid.
+fn empty_lists_are_refused() {
+    // They would hold never (`any`, no tile) or always (`all`): nobody
+    // writes that on purpose. A step with no conditions builds no `all`.
     let w = world_2d();
     assert_eq!(
         compile_json(r#"{"type": "all", "conditions": []}"#, &w),
-        Ok(Compiled::All(vec![]))
+        Err(ConditionError::NoConditions { what: "all" })
     );
     assert_eq!(
         compile_json(r#"{"type": "any", "conditions": []}"#, &w),
-        Ok(Compiled::Any(vec![]))
+        Err(ConditionError::NoConditions { what: "any" })
     );
+    for t in ["tile_is", "near_type", "count"] {
+        let json = format!(
+            r#"{{"type": "{t}", "layer": "terrain", "tile": [], "distance": 1, "min": 1}}"#
+        );
+        let json = if t == "tile_is" {
+            r#"{"type": "tile_is", "layer": "terrain", "tile": []}"#.to_string()
+        } else if t == "near_type" {
+            json.replace(r#", "min": 1"#, "")
+        } else {
+            json
+        };
+        assert_eq!(compile_json(&json, &w), Err(ConditionError::NoTiles), "{t}");
+    }
+}
+
+#[test]
+fn the_shortcuts_are_counts() {
+    let w = world_2d();
+    let bounds = |t: &str| match compile_json(
+        &format!(r#"{{"type": "{t}", "layer": "terrain", "tile": "wall", "distance": 2}}"#),
+        &w,
+    ) {
+        Ok(Compiled::Count { min, max, .. }) => (min, max),
+        other => panic!("{t}: {other:?}"),
+    };
+    assert_eq!(bounds("near_type"), (1, u64::MAX));
+    assert_eq!(bounds("not_near_type"), (0, 0));
+    // The whole 5 × 5 box, in 2D.
+    assert_eq!(bounds("area_is"), (25, 25));
 }
 
 // prepare / test — through the public API
@@ -559,14 +589,6 @@ fn combinators_follow_boolean_logic() {
     assert!(prepare_json(&any, &w).test(c));
     assert!(!prepare_json(&all, &w).test(c));
     assert!(prepare_json(&not_wall, &w).test(c));
-}
-
-#[test]
-fn empty_any_is_false_and_empty_all_is_true() {
-    let w = world_2d();
-    let c = Coord::new(12, 21, 5);
-    assert!(!prepare_json(r#"{"type": "any", "conditions": []}"#, &w).test(c));
-    assert!(prepare_json(r#"{"type": "all", "conditions": []}"#, &w).test(c));
 }
 
 #[test]
@@ -654,16 +676,6 @@ fn regions_around(grid: Bounds) -> [Bounds; 4] {
         Bounds::new(Coord::new(o.x + 5, o.y - 2, o.z), GridSize::new(6, 4, 1)),
         Bounds::new(Coord::new(o.x - 20, o.y, o.z), GridSize::new(3, 3, 1)),
     ]
-}
-
-#[test]
-fn eval_of_empty_combinators_is_all_false_or_all_true() {
-    let w = world_2d();
-    let b = w.grid.bounds();
-    let any = prepare_json(r#"{"type": "any", "conditions": []}"#, &w);
-    let all = prepare_json(r#"{"type": "all", "conditions": []}"#, &w);
-    assert_eq!(any.eval(b), CellMask::new(b));
-    assert_eq!(all.eval(b), CellMask::full(b));
 }
 
 #[test]

@@ -190,6 +190,41 @@ fn a_handle_from_another_step_is_refused() {
     ));
 }
 
+/// A condition compiled outside the build declared nothing: preparing it
+/// fails, and so does one that reads farther than the step declared.
+#[test]
+fn a_condition_must_read_what_the_step_declared() {
+    let mut w = world(1);
+    let near =
+        condition(r#"{"type": "near_type", "layer": "terrain", "tile": "tree", "distance": 2}"#)
+            .compile(&w.grid, &w.tiles)
+            .unwrap();
+    let terrain = w.grid.layer_id("terrain").unwrap();
+    let access = |reach: Reach| {
+        let mut b = BuildContext::new(&w.grid, &w.tiles, None, Scope::Local);
+        b.read("terrain", reach).unwrap();
+        b.finish("B").unwrap()
+    };
+    let (none, short, enough) = (
+        BuildContext::new(&w.grid, &w.tiles, None, Scope::Local)
+            .finish("B")
+            .unwrap(),
+        access(Reach::uniform(1)),
+        access(Reach::uniform(2)),
+    );
+    for (a, ok) in [(&none, false), (&short, false), (&enough, true)] {
+        let mut ctx = Context::new(&mut w.grid, a, StepRng::new("", 1, "b"));
+        let parts = ctx.parts();
+        match parts.grid.prepare(&near) {
+            Ok(_) => assert!(ok),
+            Err(e) => {
+                assert!(!ok);
+                assert_eq!(e, OpError::Undeclared { layer: terrain });
+            }
+        }
+    }
+}
+
 // Registry
 
 struct Nop;

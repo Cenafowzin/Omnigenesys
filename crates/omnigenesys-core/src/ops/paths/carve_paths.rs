@@ -71,7 +71,8 @@ pub struct CarvePathsConfig {
     pub turn: Option<u32>,
 }
 
-/// Cells where all of `where` holds cost `cost`.
+/// Cells where all of `where` holds cost `cost`; an empty `where` is every
+/// cell.
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CostRule {
@@ -116,7 +117,8 @@ pub struct CarvePaths {
     width: u32,
     filter: CompiledFilter,
     when: Option<CompiledCondition>,
-    costs: Vec<(CompiledCondition, u32)>,
+    /// `None`: the rule holds on every cell.
+    costs: Vec<(Option<CompiledCondition>, u32)>,
     turn: u32,
 }
 
@@ -164,10 +166,11 @@ impl OperatorType for CarvePaths {
                 }
                 Cost::Word(Blocked::Blocked) => BLOCKED,
             };
-            let all = Condition::All {
+            // `where: []` is every cell: a catch-all rule at the end.
+            let all = (!rule.conditions.is_empty()).then(|| Condition::All {
                 conditions: rule.conditions.clone(),
-            };
-            costs.push((bcx.condition(&all)?, cost));
+            });
+            costs.push((all.map(|a| bcx.condition(&a)).transpose()?, cost));
         }
         let connections = bcx.read_objects(&c.connections)?;
         // Declares the layers it looks into, too.
@@ -250,9 +253,9 @@ impl CarvePaths {
         // 0: no rule has said yet.
         let mut cost = vec![0; region.size.len()];
         for (rule, c) in &self.costs {
-            let holds = grid.prepare(rule)?.eval(region);
+            let holds = grid.mask(rule.as_ref())?;
             for (k, p) in region.iter().enumerate() {
-                if cost[k] == 0 && holds.get(p) {
+                if cost[k] == 0 && holds.as_ref().is_none_or(|m| m.get(p)) {
                     cost[k] = *c;
                 }
             }

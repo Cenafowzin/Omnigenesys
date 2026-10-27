@@ -709,3 +709,48 @@ fn an_error_later_says_which_expression_gave_the_value() {
         "the value 2.0 comes from the expression `k / 2`"
     );
 }
+
+#[test]
+fn reading_a_layer_before_any_step_writes_it_is_a_warning() {
+    let text = with(|v| {
+        v["layers"] = json!(["terrain", "relevo"]);
+        v["steps"] = json!([
+            {"id": "a", "operator": "Fill", "config": {"layer": "terrain", "tile": "wall"},
+             "conditions": [{"type": "tile_is", "layer": "relevo", "tile": "floor"}]},
+            {"id": "b", "operator": "Fill", "config": {"layer": "relevo", "tile": "floor"}},
+            {"id": "c", "operator": "Fill", "config": {"layer": "terrain", "tile": "floor"},
+             "conditions": [{"type": "tile_is", "layer": "relevo", "tile": "floor"}]}
+        ]);
+    });
+    let spec = parse(&text).spec;
+    let built = spec.build(&Registry::with_builtins()).unwrap();
+    let warnings = spec.unwritten_reads(&built);
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    let w = &warnings[0];
+    assert_eq!(w.step_id.as_deref(), Some("a"));
+    assert_eq!(w.pointer, "/steps/0");
+    assert!(w.message.contains("'relevo'"), "{}", w.message);
+    assert!(w.span.is_some());
+}
+
+#[test]
+fn a_missing_layer_in_a_cells_filter_is_reported_once() {
+    let cells = json!([{"type": "cells", "max": 0,
+        "condition": {"type": "tile_is", "layer": "agua", "tile": "wall"}}]);
+    let text = with(|v| {
+        v["layers"] = json!(["terrain", {"name": "casas", "kind": "objects"}]);
+        v["steps"] = json!([
+            {"id": "a", "operator": "PlaceObjects", "config": {"layer": "casas", "kind": "casa",
+             "size": {"width": 2, "height": 2}, "where": cells}},
+            {"id": "b", "operator": "PlaceObjects", "config": {"layer": "casas", "kind": "casa",
+             "size": {"width": 2, "height": 2}, "where": cells}}
+        ]);
+    });
+    let errors = parse(&text)
+        .spec
+        .build(&Registry::with_builtins())
+        .err()
+        .unwrap();
+    assert_eq!(errors.len(), 1, "{errors:#?}");
+    assert_eq!(errors[0].step_id.as_deref(), Some("a"));
+}

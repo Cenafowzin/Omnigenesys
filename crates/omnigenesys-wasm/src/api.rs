@@ -6,8 +6,6 @@
 //! binary anyway, and the download needs the text. Positions in diagnostics
 //! are UTF-16 offsets, the unit of JavaScript strings and of web editors.
 
-use std::collections::HashSet;
-
 use omnigenesys_core::{
     access::Reach,
     export::{self, Encoding, Provenance},
@@ -141,41 +139,14 @@ fn report(
     if let Some((spec, built)) = built {
         out["steps"] = steps(spec, built);
         if let Value::Array(list) = &mut out["warnings"] {
-            list.extend(unwritten_reads(spec, built));
+            list.extend(
+                spec.unwritten_reads(built)
+                    .iter()
+                    .map(|d| diagnostic(text, d)),
+            );
         }
     }
     out.to_string()
-}
-
-/// A step that reads a layer no earlier step wrote: it sees it empty, which
-/// is rarely what was meant (a step moved above the one it depends on).
-fn unwritten_reads(spec: &PipelineSpec, built: &Built) -> Vec<Value> {
-    let mut written = HashSet::new();
-    let mut out = Vec::new();
-    for (i, s) in spec.steps.iter().enumerate().filter(|(_, s)| s.enabled) {
-        let Some(access) = built.pipeline.access(&s.id) else {
-            continue;
-        };
-        for l in access.layers() {
-            if access.read_reach(l.layer).is_some() && !written.contains(&l.layer) {
-                let name = built.grid.layer_name(l.layer).unwrap_or("?");
-                out.push(json!({
-                    "message": format!(
-                        "reads layer '{name}', but no step before it writes there: it is still empty"
-                    ),
-                    "step_id": s.id, "pointer": format!("/steps/{i}"), "span": null, "note": null,
-                }));
-            }
-        }
-        written.extend(
-            access
-                .layers()
-                .iter()
-                .filter(|l| l.write.is_some())
-                .map(|l| l.layer),
-        );
-    }
-    out
 }
 
 fn diagnostic(text: &str, d: &Diagnostic) -> Value {

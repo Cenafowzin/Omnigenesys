@@ -7,6 +7,7 @@ use thiserror::Error;
 use crate::{
     access::Access,
     condition::{Condition, ConditionError},
+    filter::FilterError,
     grid::{Grid, GridError},
     operator::{BuildContext, BuildError, OpError, Operator, Registry},
     rng::StepRng,
@@ -280,11 +281,20 @@ fn build_step(
 
 /// The layer name, if the error is "this layer does not exist".
 fn missing_layer(e: &BuildError) -> Option<&str> {
-    match e {
-        BuildError::Grid(GridError::LayerNotFound { name })
-        | BuildError::Condition(ConditionError::Grid(GridError::LayerNotFound { name })) => {
-            Some(name)
+    fn in_condition(c: &ConditionError) -> Option<&str> {
+        match c {
+            ConditionError::Grid(GridError::LayerNotFound { name }) => Some(name),
+            _ => None,
         }
+    }
+    match e {
+        BuildError::Grid(GridError::LayerNotFound { name }) => Some(name),
+        BuildError::Condition(c) => in_condition(c),
+        // Inside an object filter's `cells`.
+        BuildError::Filter {
+            error: FilterError::Condition(c),
+            ..
+        } => in_condition(c),
         _ => None,
     }
 }
