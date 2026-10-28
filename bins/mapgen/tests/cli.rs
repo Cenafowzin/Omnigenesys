@@ -231,6 +231,7 @@ fn schema_and_operators_go_to_stdout() {
          LinearGradient     2d/3d  local\n\
          MeasureObjects     2d/3d  global\n\
          Noise              2d     local\n\
+         PickVariant        2d/3d  local\n\
          PlaceObjects       2d     global\n\
          RadialGradient     2d/3d  local\n\
          RegionSize         2d/3d  global\n\

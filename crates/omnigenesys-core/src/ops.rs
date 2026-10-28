@@ -3,7 +3,7 @@
 //! what a map does with them is in the pipeline's steps and conditions.
 //!
 //! - `terrain`: `Fill`.
-//! - `scatter`: `Scatter`.
+//! - `scatter`: `Scatter`, `PickVariant`.
 //! - `field`: scalar layers — `Noise`, `RadialGradient`,
 //!   `LinearGradient`, `Combine`, `Curve`.
 //! - `shape`: `CellularAutomaton`, `RegionSize`.
@@ -37,7 +37,7 @@ pub use objects::{
 pub use paths::{
     AddField, AddRule, AddTerm, Blocked, CarvePaths, CarvePathsConfig, Cost, CostRule, PathShape,
 };
-pub use scatter::{Scatter, ScatterConfig};
+pub use scatter::{PickVariant, PickVariantConfig, Scatter, ScatterConfig};
 pub use shape::{
     CellularAutomaton, CellularAutomatonConfig, Connectivity, Outside, RegionSize, RegionSizeConfig,
 };
@@ -64,6 +64,7 @@ pub(crate) fn register_builtins(r: &mut Registry) {
     add::<LinearGradient>(r);
     add::<MeasureObjects>(r);
     add::<Noise>(r);
+    add::<PickVariant>(r);
     add::<PlaceObjects>(r);
 
     add::<RadialGradient>(r);
