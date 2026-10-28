@@ -13,7 +13,7 @@ use crate::{
         BuildContext, BuildError, Context, Dimensions, GridView, OpError, Operator, OperatorType,
         Scope,
     },
-    pathfinding::{BLOCKED, cheapest_path},
+    pathfinding::{BLOCKED, cheapest_path, cheapest_path_to},
     rng::{StepRng, pick},
     tile::TileId,
 };
@@ -22,6 +22,14 @@ use crate::{
 /// the object its `from` names to the middle of the one its `to` names
 /// (the props `ConnectObjects` writes), and writes `tile` along it, `width`
 /// cells wide. The step's conditions say where it may write, as in `Fill`.
+///
+/// Or, with `to_cells` in place of `connections`, a path from the middle
+/// of each object of `objects` that passes `where` to the cheapest cell to
+/// reach where `to_cells` holds, worked out again after each path: a
+/// branch that leaves the paths and leads to a spot (a loose 1 × 1 object)
+/// where nothing is any more, joining them where the costs say (Mizdal &
+/// Pozzer's roads "to any other road"; pesquisa
+/// 2026-10-27-caminhos-organicos, Q3). `cheapest` only.
 ///
 /// - `l`: one straight leg and then the other; which goes first is a coin
 ///   flip (Wolverson's tutorial).
@@ -54,10 +62,16 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CarvePathsConfig {
-    /// Object layer with the connections.
-    pub connections: String,
-    /// Object layer with the objects the connections join.
+    /// Object layer with the connections; or give `to_cells`.
+    #[serde(default)]
+    pub connections: Option<String>,
+    /// Object layer with the objects the connections join (with
+    /// `to_cells`, the objects the paths start from).
     pub objects: String,
+    /// In place of `connections`, with `cheapest`: where each path ends,
+    /// the cells where all of these hold.
+    #[serde(default)]
+    pub to_cells: Vec<Condition>,
     /// Tile layer to write.
     pub layer: String,
     pub tile: String,
@@ -67,7 +81,7 @@ pub struct CarvePathsConfig {
     #[serde(default = "one")]
     #[schemars(range(min = 1, max = 5))]
     pub width: u32,
-    /// Which connections get a path.
+    /// Which connections (with `to_cells`, which objects) get a path.
     #[serde(rename = "where", default)]
     pub filter: Vec<ObjectFilter>,
     /// `cheapest` only: what walking into a cell costs, by rules in order.
@@ -149,7 +163,9 @@ pub enum Shape {
 }
 
 pub struct CarvePaths {
-    connections: ReadHandle,
+    /// `None` with `to_cells`.
+    connections: Option<ReadHandle>,
+    to_cells: Option<CompiledCondition>,
     objects: ReadHandle,
     layer: WriteHandle,
     tile: TileId,
@@ -178,11 +194,36 @@ impl OperatorType for CarvePaths {
                 message: format!("{} is not between 1 and 5", c.width),
             });
         }
-        if c.objects == c.connections {
-            return Err(BuildError::Invalid {
-                field: "objects".into(),
-                message: "the objects the connections join are in a layer of their own".into(),
-            });
+        match (&c.connections, c.to_cells.is_empty()) {
+            (Some(_), false) => {
+                return Err(BuildError::Invalid {
+                    field: "to_cells".into(),
+                    message: "a path goes along a connection or to cells, not both: \
+                              leave out `connections` or `to_cells`"
+                        .into(),
+                });
+            }
+            (None, true) => {
+                return Err(BuildError::Invalid {
+                    field: "connections".into(),
+                    message: "say what the paths join: `connections`, or `to_cells` \
+                              for paths from each object to the nearest of some cells"
+                        .into(),
+                });
+            }
+            (None, false) if c.shape != Shape::Cheapest => {
+                return Err(BuildError::Invalid {
+                    field: "to_cells".into(),
+                    message: "only a `cheapest` path finds its way to cells".into(),
+                });
+            }
+            (Some(connections), _) if *connections == c.objects => {
+                return Err(BuildError::Invalid {
+                    field: "objects".into(),
+                    message: "the objects the connections join are in a layer of their own".into(),
+                });
+            }
+            _ => {}
         }
         if c.shape != Shape::Cheapest
             && (c.turn.is_some() || !c.costs.is_empty() || !c.add.is_empty())
@@ -255,12 +296,26 @@ impl OperatorType for CarvePaths {
                 }
             }
         }
-        let connections = bcx.read_objects(&c.connections)?;
+        let connections = c
+            .connections
+            .as_deref()
+            .map(|l| bcx.read_objects(l))
+            .transpose()?;
+        let objects = bcx.read_objects(&c.objects)?;
+        let to_cells = (!c.to_cells.is_empty())
+            .then(|| {
+                bcx.condition(&Condition::All {
+                    conditions: c.to_cells.clone(),
+                })
+            })
+            .transpose()?;
         // Declares the layers it looks into, too.
-        let filter = bcx.filter("where", &c.filter, connections.layer())?;
+        let picked = connections.unwrap_or(objects);
+        let filter = bcx.filter("where", &c.filter, picked.layer())?;
         Ok(CarvePaths {
             connections,
-            objects: bcx.read_objects(&c.objects)?,
+            to_cells,
+            objects,
             layer: bcx.write(&c.layer)?,
             tile: bcx.tile(&c.tile)?,
             shape: c.shape,
@@ -448,7 +503,8 @@ impl Operator for CarvePaths {
         // see it as it was when the step started.
         let mask = grid.mask(self.when.as_ref())?;
         let filter = grid.prepare_filter(&self.filter)?;
-        let mut reads = vec![self.connections, self.objects];
+        let mut reads: Vec<ReadHandle> = self.connections.into_iter().collect();
+        reads.push(self.objects);
         for l in self.filter.layers() {
             if reads.iter().all(|r| r.layer() != l) {
                 reads.push(ReadHandle { layer: l });
@@ -462,7 +518,40 @@ impl Operator for CarvePaths {
                 .zip(&split.reads)
                 .filter_map(|(h, l)| Some((h.layer(), l.as_objects()?))),
         );
-        let id = self.connections.layer();
+        if let Some(to) = &self.to_cells {
+            let id = self.objects.layer();
+            let starts: Vec<(crate::object::ObjectId, Coord)> = scene
+                .objects(id)
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| filter.test(&scene, id, Subject::Object(i)))
+                .map(|(_, o)| (o.id, o.bbox.centre()))
+                .collect();
+            drop(split);
+            for (oid, a) in starts {
+                let cost = self.costs(&grid)?;
+                let goals = grid.prepare(to)?.eval(grid.region());
+                let mut set = vec![false; grid.region().size.len()];
+                for k in goals.indices() {
+                    set[k] = true;
+                }
+                let cells = cheapest_path_to(grid.region(), &cost, self.turn, a, &set).ok_or_else(
+                    || OpError::Failed {
+                        message: format!(
+                            "object {oid:?}: no cell where `to_cells` holds can be reached \
+                             from ({}, {})",
+                            a.x, a.y
+                        ),
+                    },
+                )?;
+                self.brush(&mut grid, &cells, mask.as_ref())?;
+            }
+            return Ok(());
+        }
+        let id = self
+            .connections
+            .expect("one of the two, checked when built")
+            .layer();
         let ends: &[Object] = scene.objects(self.objects.layer());
         let end = |c: &Object, prop: &str| -> Result<Coord, OpError> {
             let target =

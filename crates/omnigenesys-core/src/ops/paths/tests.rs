@@ -322,7 +322,9 @@ fn an_added_rule_is_the_same_as_its_sum_in_costs() {
         .unwrap();
         let added = run(&pipeline(
             1,
-            carve(json!({"shape": "cheapest", "turn": turn, "add": [{"where": [wall], "cost": 9}]})),
+            carve(
+                json!({"shape": "cheapest", "turn": turn, "add": [{"where": [wall], "cost": 9}]}),
+            ),
             json!([]),
         ))
         .unwrap();
@@ -340,7 +342,10 @@ fn a_field_term_makes_the_path_go_round_its_hills() {
             carve(json!({"shape": "cheapest", "add": [{"field": "morro", "weight": weight}]})),
             json!([]),
         );
-        p["layers"].as_array_mut().unwrap().push(json!({"name": "morro", "kind": "scalar"}));
+        p["layers"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name": "morro", "kind": "scalar"}));
         // 1 at (8, 3)…(9, 3), falling to 0 three cells away; a Curve
         // inverted so the hill is high in the middle.
         let hill = [
@@ -360,7 +365,11 @@ fn a_field_term_makes_the_path_go_round_its_hills() {
     let flat = rows_with(0.0);
     assert!((4..=13).all(|x| open(&flat, x, 3)), "\n{}", flat.join("\n"));
     let hilly = rows_with(40.0);
-    assert!(!(4..=13).all(|x| open(&hilly, x, 3)), "\n{}", hilly.join("\n"));
+    assert!(
+        !(4..=13).all(|x| open(&hilly, x, 3)),
+        "\n{}",
+        hilly.join("\n")
+    );
     assert!(open(&hilly, 4, 3) && open(&hilly, 13, 3));
 }
 
@@ -376,7 +385,10 @@ fn added_terms_keep_costs_from_1_and_blocked_cells_blocked() {
             "add": [{"field": "todo", "weight": -500}]})),
         json!([]),
     );
-    p["layers"].as_array_mut().unwrap().push(json!({"name": "todo", "kind": "scalar"}));
+    p["layers"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name": "todo", "kind": "scalar"}));
     let steps = p["steps"].as_array_mut().unwrap();
     let at = steps.len() - 1;
     steps.insert(at, json!({"id": "todo", "operator": "LinearGradient", "config": {"layer": "todo", "start": 0, "end": 0.01}}));
@@ -394,11 +406,109 @@ fn add_is_checked_when_built() {
     };
     let wall = json!({"type": "in_object", "layer": "salas", "part": "wall"});
     assert!(bad(json!({"add": [{"where": [wall], "cost": 3}]})).contains("only a `cheapest` path"));
-    assert!(bad(json!({"shape": "cheapest", "add": [{"where": [wall], "cost": 0}]})).contains("term 0: a cost of 0"));
+    assert!(
+        bad(json!({"shape": "cheapest", "add": [{"where": [wall], "cost": 0}]}))
+            .contains("term 0: a cost of 0")
+    );
     let e = bad(json!({"shape": "cheapest", "add": [{"field": "nada", "weight": 2}]}));
     assert!(e.contains("nada"), "{e}");
     let e = bad(json!({"shape": "cheapest", "add": [{"field": "x", "weight": 20000}]}));
     assert!(e.contains("not found") || e.contains("20000"), "{e}");
     let e = bad(json!({"shape": "cheapest", "add": [{"wehre": [], "cost": 3}]}));
     assert!(e.contains("\"field\": layer, \"weight\": w"), "{e}");
+}
+
+// to_cells: from loose spots to the nearest path
+
+/// Spots on "outra", pinned with `at` at (x, 15) for each x; then a branch
+/// from each to the nearest `chao`, after the corridor A–B along y 3.
+fn branches(xs: &[i32]) -> Vec<String> {
+    let mut p = pipeline(0, carve(json!({})), json!([]));
+    let steps = p["steps"].as_array_mut().unwrap();
+    for (k, &x) in xs.iter().enumerate() {
+        steps.push(
+            json!({"id": format!("ponta{k}"), "operator": "PlaceObjects", "config": {
+            "layer": "outra", "kind": "ponta", "size": {"width": 1, "height": 1},
+            "at": {"x": {"frac": 0, "offset": x}, "y": {"frac": 0, "offset": 15}}}}),
+        );
+    }
+    steps.push(json!({"id": "ramos", "operator": "CarvePaths", "config": {
+        "objects": "outra", "layer": "terreno", "tile": "chao", "shape": "cheapest",
+        "to_cells": [{"type": "tile_is", "layer": "terreno", "tile": "chao"}]}}));
+    run(&p).unwrap()
+}
+
+/// The `#` cells joined to (x, y) side by side.
+fn joined(rows: &[String], x: usize, y: usize) -> usize {
+    let open = |x: usize, y: usize| rows[y].as_bytes()[x] == b'#';
+    let mut seen = vec![vec![false; 40]; 20];
+    let mut todo = vec![(x, y)];
+    seen[y][x] = true;
+    let mut n = 0;
+    while let Some((x, y)) = todo.pop() {
+        n += 1;
+        let mut go = |a: usize, b: usize| {
+            if a < 40 && b < 20 && !seen[b][a] && open(a, b) {
+                seen[b][a] = true;
+                todo.push((a, b));
+            }
+        };
+        go(x + 1, y);
+        go(x.wrapping_sub(1), y);
+        go(x, y + 1);
+        go(x, y.wrapping_sub(1));
+    }
+    n
+}
+
+#[test]
+fn a_branch_joins_the_spot_to_the_nearest_path() {
+    let corridor = 10; // (4, 3) to (13, 3)
+    let rows = branches(&[30]);
+    let all: usize = rows.iter().map(|r| r.matches('#').count()).sum();
+    // From (30, 15) to the corridor's end (13, 3): 17 + 12 steps.
+    assert_eq!(all, corridor + 29, "\n{}", rows.join("\n"));
+    assert_eq!(joined(&rows, 30, 15), all);
+}
+
+#[test]
+fn a_later_branch_can_end_on_an_earlier_one() {
+    let one: usize = branches(&[30]).iter().map(|r| r.matches('#').count()).sum();
+    let rows = branches(&[30, 36]);
+    let two: usize = rows.iter().map(|r| r.matches('#').count()).sum();
+    // The second spot is 6 from the first branch, far from the corridor.
+    assert_eq!(two - one, 6, "\n{}", rows.join("\n"));
+    assert_eq!(joined(&rows, 36, 15), two);
+}
+
+#[test]
+fn to_cells_is_checked_when_built_and_when_run() {
+    let bad = |config: Json| {
+        let mut p = pipeline(0, carve(json!({})), json!([]));
+        p["steps"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": "ramos", "operator": "CarvePaths", "config": config}));
+        build(&p).err().unwrap()[0].message.clone()
+    };
+    let chao = json!([{"type": "tile_is", "layer": "terreno", "tile": "chao"}]);
+    let e = bad(
+        json!({"connections": "conexoes", "objects": "salas", "layer": "terreno", "tile": "chao",
+                       "shape": "cheapest", "to_cells": chao}),
+    );
+    assert!(e.contains("not both"), "{e}");
+    let e =
+        bad(json!({"objects": "salas", "layer": "terreno", "tile": "chao", "shape": "cheapest"}));
+    assert!(e.contains("say what the paths join"), "{e}");
+    let e = bad(json!({"objects": "salas", "layer": "terreno", "tile": "chao", "to_cells": chao}));
+    assert!(e.contains("only a `cheapest` path finds its way"), "{e}");
+    // Nothing to reach: the step fails, for `attempts` to retry.
+    let mut p = pipeline(0, carve(json!({})), json!([]));
+    p["steps"].as_array_mut().unwrap().push(
+        json!({"id": "ramos", "operator": "CarvePaths", "config": {
+        "objects": "salas", "layer": "terreno", "tile": "chao", "shape": "cheapest",
+        "to_cells": [{"type": "tile_is", "layer": "terreno", "tile": "empty"}]}}),
+    );
+    let e = run(&p).unwrap_err();
+    assert!(e.contains("no cell where `to_cells` holds"), "{e}");
 }

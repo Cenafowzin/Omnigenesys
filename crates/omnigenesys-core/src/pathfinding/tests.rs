@@ -252,3 +252,69 @@ fn the_walk_found_is_a_cheapest_one_on_uneven_costs() {
         }
     }
 }
+
+/// To a set of goals: the walk ends on one, and costs the least of the
+/// plain Dijkstra to each.
+#[test]
+fn the_walk_to_the_nearest_goal_is_a_cheapest_one() {
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let region = Bounds::new(Coord::new(-3, 5, 2), GridSize::new(21, 15, 1));
+    let cells = region.size.len();
+    let pick = |r: u64| {
+        let i = (r % cells as u64) as usize;
+        Coord::new(
+            region.origin.x + (i % 21) as i32,
+            region.origin.y + (i / 21) as i32,
+            2,
+        )
+    };
+    for round in 0..200 {
+        let base = 1 + (round % 3) as u32;
+        let cost: Vec<u32> = (0..cells)
+            .map(|_| match next() % 20 {
+                0..=2 => BLOCKED,
+                k => base + (k % 5) as u32,
+            })
+            .collect();
+        let goals: Vec<Coord> = (0..1 + round % 4).map(|_| pick(next())).collect();
+        let mut set = vec![false; cells];
+        for g in &goals {
+            set[region.index_of(*g).unwrap()] = true;
+        }
+        let from = pick(next());
+        for turn in [0, 2] {
+            let want = goals
+                .iter()
+                .filter_map(|&g| dijkstra(region, &cost, turn, from, g))
+                .min();
+            let got = cheapest_path_to(region, &cost, turn, from, &set);
+            match (want, got) {
+                (None, None) => {}
+                (Some(w), Some(path)) => {
+                    steps_are_side_by_side(&path);
+                    assert!(set[region.index_of(*path.last().unwrap()).unwrap()]);
+                    assert_eq!(
+                        walk_cost(region, &cost, turn, &path),
+                        w,
+                        "round {round}, turn {turn}"
+                    );
+                }
+                (w, g) => panic!(
+                    "round {round}, turn {turn}: {w:?} vs {:?}",
+                    g.map(|p| p.len())
+                ),
+            }
+        }
+    }
+    // No goal at all: no walk.
+    assert_eq!(
+        cheapest_path_to(region, &vec![1; cells], 0, pick(3), &vec![false; cells]),
+        None
+    );
+}
