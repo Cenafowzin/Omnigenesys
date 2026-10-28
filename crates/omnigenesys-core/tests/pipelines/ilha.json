@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Ilha: noise fBm puxado para baixo nas bordas por um gradiente redondo, pintado por faixas de altura.",
+  "description": "Ilha: noise fBm puxado para baixo nas bordas por um gradiente redondo, pintado por faixas de altura. Os params mudam a escala do relevo, o tamanho da ilha e o nível do mar.",
   "seed": 512,
   "size": {
     "width": 64,
@@ -25,24 +25,57 @@
     "pedra",
     "neve"
   ],
+  "params": {
+    "escala": {
+      "type": "number",
+      "default": 48,
+      "min": 8,
+      "max": 200,
+      "step": 1,
+      "description": "Tamanho das formas do relevo, em células: maior, morros mais largos e costa mais lisa"
+    },
+    "tamanho": {
+      "type": "number",
+      "default": 0.6,
+      "min": 0.2,
+      "max": 1.2,
+      "step": 0.01,
+      "description": "Raio da ilha, em fração do lado menor do mapa: 0,5 encosta nas bordas mais próximas"
+    },
+    "nivel_do_mar": {
+      "type": "number",
+      "default": 0.42,
+      "min": 0.3,
+      "max": 0.5,
+      "step": 0.01,
+      "description": "Altura abaixo da qual é mar: mais alto, ilha menor; a praia é a faixa logo acima"
+    }
+  },
   "steps": [
     {
       "id": "relevo",
       "operator": "Noise",
       "config": {
         "layer": "altura",
-        "wavelength": 48,
+        "wavelength": {
+          "$param": "escala"
+        },
         "octaves": 5
-      }
+      },
+      "description": "Ruído fBm (OpenSimplex2, 5 oitavas) de 0 a 1: a altura antes da costa."
     },
     {
       "id": "centro",
       "operator": "RadialGradient",
-      "description": "Distância do centro: 0 no meio, 1 numa borda redonda um pouco além do mapa.",
+      "description": "Distância do centro: 0 no meio, 1 numa borda redonda de raio `tamanho`.",
       "config": {
         "layer": "distancia",
-        "radius_x": 0.6,
-        "radius_y": 0.6
+        "radius_x": {
+          "$param": "tamanho"
+        },
+        "radius_y": {
+          "$param": "tamanho"
+        }
       }
     },
     {
@@ -82,6 +115,7 @@
     {
       "id": "mar",
       "operator": "Fill",
+      "description": "Abaixo do nível do mar: mar.",
       "config": {
         "layer": "terreno",
         "tile": "mar"
@@ -90,13 +124,16 @@
         {
           "type": "scalar_in_range",
           "layer": "altura",
-          "max": 0.42
+          "max": {
+            "$param": "nivel_do_mar"
+          }
         }
       ]
     },
     {
       "id": "praia",
       "operator": "Fill",
+      "description": "Logo acima do mar: areia.",
       "config": {
         "layer": "terreno",
         "tile": "areia"
@@ -105,14 +142,19 @@
         {
           "type": "scalar_in_range",
           "layer": "altura",
-          "min": 0.42,
-          "max": 0.45
+          "min": {
+            "$param": "nivel_do_mar"
+          },
+          "max": {
+            "$expr": "nivel_do_mar + 0.03"
+          }
         }
       ]
     },
     {
       "id": "campo",
       "operator": "Fill",
+      "description": "Terras baixas: grama.",
       "config": {
         "layer": "terreno",
         "tile": "grama"
@@ -121,7 +163,9 @@
         {
           "type": "scalar_in_range",
           "layer": "altura",
-          "min": 0.45,
+          "min": {
+            "$expr": "nivel_do_mar + 0.03"
+          },
           "max": 0.58
         }
       ]
@@ -129,6 +173,7 @@
     {
       "id": "mata",
       "operator": "Fill",
+      "description": "Encostas: mata.",
       "config": {
         "layer": "terreno",
         "tile": "mata"
@@ -145,6 +190,7 @@
     {
       "id": "pedra",
       "operator": "Fill",
+      "description": "Alto: pedra.",
       "config": {
         "layer": "terreno",
         "tile": "pedra"
@@ -161,6 +207,7 @@
     {
       "id": "neve",
       "operator": "Fill",
+      "description": "Os picos: neve.",
       "config": {
         "layer": "terreno",
         "tile": "neve"

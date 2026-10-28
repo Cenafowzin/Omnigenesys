@@ -1,10 +1,10 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::each_cell;
 use crate::{
     access::WriteHandle,
     condition::CompiledCondition,
-    mask::CellMask,
     operator::{
         BuildContext, BuildError, Context, Dimensions, OpError, Operator, OperatorType, Scope,
     },
@@ -153,24 +153,22 @@ impl Operator for RadialGradient {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = grid
-            .mask(self.when.as_ref())?
-            .unwrap_or_else(|| CellMask::full(region));
+        let mask = grid.mask(self.when.as_ref())?;
         let map = grid.map();
         let (w, h) = (f64::from(map.size.width), f64::from(map.size.height));
         let (cx, cy) = (self.centre.0 * w, self.centre.1 * h);
         let side = w.min(h);
         let (rx, ry) = (self.radius.0 * side, self.radius.1 * side);
-        let layer = grid.scalars_mut(self.layer)?;
-        for c in mask.iter_ones() {
+        let out = grid.scalars_mut(self.layer)?.as_mut_slice();
+        each_cell(region, mask.as_ref(), |c, i| {
             // From the centre to the centre of the cell, in cells, turned
             // back by the rotation and measured in radii.
             let px = f64::from(c.x - map.origin.x) + 0.5 - cx;
             let py = f64::from(c.y - map.origin.y) + 0.5 - cy;
             let u = (px * self.cos + py * self.sin) / rx;
             let v = (py * self.cos - px * self.sin) / ry;
-            layer.set(c, self.norm.of(u, v).min(1.0) as f32)?;
-        }
+            out[i] = self.norm.of(u, v).min(1.0) as f32;
+        });
         Ok(())
     }
 }

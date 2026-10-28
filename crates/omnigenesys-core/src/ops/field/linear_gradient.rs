@@ -1,10 +1,10 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::each_cell;
 use crate::{
     access::WriteHandle,
     condition::CompiledCondition,
-    mask::CellMask,
     operator::{
         BuildContext, BuildError, Context, Dimensions, OpError, Operator, OperatorType, Scope,
     },
@@ -95,22 +95,20 @@ impl Operator for LinearGradient {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = grid
-            .mask(self.when.as_ref())?
-            .unwrap_or_else(|| CellMask::full(region));
+        let mask = grid.mask(self.when.as_ref())?;
         let map = grid.map();
         let (w, h) = (f64::from(map.size.width), f64::from(map.size.height));
         // How far the map reaches along the direction, corner to corner.
         let span = w * self.cos.abs() + h * self.sin.abs();
-        let layer = grid.scalars_mut(self.layer)?;
-        for c in mask.iter_ones() {
+        let out = grid.scalars_mut(self.layer)?.as_mut_slice();
+        each_cell(region, mask.as_ref(), |c, i| {
             // From the middle of the map to the centre of the cell.
             let px = f64::from(c.x - map.origin.x) + 0.5 - w / 2.0;
             let py = f64::from(c.y - map.origin.y) + 0.5 - h / 2.0;
             let along = (px * self.cos + py * self.sin) / span + 0.5;
             let v = ((along - self.start) / (self.end - self.start)).clamp(0.0, 1.0);
-            layer.set(c, v as f32)?;
-        }
+            out[i] = v as f32;
+        });
         Ok(())
     }
 }

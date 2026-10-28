@@ -1,10 +1,10 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::each_cell;
 use crate::{
     access::{Reach, ReadHandle, WriteHandle},
     condition::CompiledCondition,
-    mask::CellMask,
     operator::{
         BuildContext, BuildError, Context, Dimensions, OpError, Operator, OperatorType, Scope,
     },
@@ -311,9 +311,7 @@ impl Operator for Curve {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = grid
-            .mask(self.when.as_ref())?
-            .unwrap_or_else(|| CellMask::full(region));
+        let mask = grid.mask(self.when.as_ref())?;
         // When `from` is the output it is read from it: each cell is read
         // before it is written, and no other cell is read.
         let same = self.from.layer() == self.out.layer();
@@ -326,14 +324,17 @@ impl Operator for Curve {
         let from = split
             .reads
             .first()
-            .map(|l| l.as_scalar().expect("checked when built"));
-        let out = split.writes[0].as_scalar_mut().expect("checked when built");
-        for c in mask.iter_ones() {
-            let v = from.map_or_else(|| out.get(c), |l| l.get(c));
-            let x = f64::from(*v.unwrap_or(&0.0)).clamp(0.0, 1.0);
+            .map(|l| l.as_scalar().expect("checked when built").as_slice());
+        let out = split.writes[0]
+            .as_scalar_mut()
+            .expect("checked when built")
+            .as_mut_slice();
+        each_cell(region, mask.as_ref(), |_, i| {
+            let v = from.map_or(out[i], |l| l[i]);
+            let x = f64::from(v).clamp(0.0, 1.0);
             let y = self.shape.eval(x).clamp(0.0, 1.0);
-            out.set(c, (if self.invert { 1.0 - y } else { y }) as f32)?;
-        }
+            out[i] = (if self.invert { 1.0 - y } else { y }) as f32;
+        });
         Ok(())
     }
 }

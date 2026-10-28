@@ -1,11 +1,10 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::each_cell;
 use crate::{
     access::{Reach, ReadHandle, WriteHandle},
     condition::CompiledCondition,
-    layer::Layer,
-    mask::CellMask,
     operator::{
         BuildContext, BuildError, Context, Dimensions, OpError, Operator, OperatorType, Scope,
     },
@@ -113,9 +112,7 @@ impl Operator for Combine {
         let parts = ctx.parts();
         let mut grid = parts.grid;
         let region = grid.region();
-        let mask = grid
-            .mask(self.when.as_ref())?
-            .unwrap_or_else(|| CellMask::full(region));
+        let mask = grid.mask(self.when.as_ref())?;
         // An input that is the output is read from it: each cell is read
         // before it is written, and no other cell is read.
         let others: Vec<ReadHandle> = self
@@ -127,21 +124,27 @@ impl Operator for Combine {
         let mut split = grid.split(&others, &[self.out])?;
         let mut reads = split.reads.iter().map(|l| l.as_scalar());
         // `None` for the output.
-        let inputs: Vec<(Option<&Layer<f32>>, f32)> = self
+        let inputs: Vec<(Option<&[f32]>, f32)> = self
             .inputs
             .iter()
             .map(|&(h, w)| {
-                let l = (h.layer() != self.out.layer())
-                    .then(|| reads.next().flatten().expect("checked when built"));
+                let l = (h.layer() != self.out.layer()).then(|| {
+                    reads
+                        .next()
+                        .flatten()
+                        .expect("checked when built")
+                        .as_slice()
+                });
                 (l, w)
             })
             .collect();
-        let out = split.writes[0].as_scalar_mut().expect("checked when built");
-        for c in mask.iter_ones() {
-            let here = *out.get(c).unwrap_or(&0.0);
-            let values = inputs
-                .iter()
-                .map(|(l, w)| (l.map_or(here, |l| *l.get(c).unwrap_or(&0.0)), *w));
+        let out = split.writes[0]
+            .as_scalar_mut()
+            .expect("checked when built")
+            .as_mut_slice();
+        each_cell(region, mask.as_ref(), |_, i| {
+            let here = out[i];
+            let values = inputs.iter().map(|(l, w)| (l.map_or(here, |l| l[i]), *w));
             // There are always two or more inputs, so the infinities never
             // come out.
             let v = match self.op {
@@ -150,8 +153,8 @@ impl Operator for Combine {
                 CombineOp::Min => values.map(|(x, _)| x).fold(f32::INFINITY, f32::min),
                 CombineOp::Max => values.map(|(x, _)| x).fold(f32::NEG_INFINITY, f32::max),
             };
-            out.set(c, if self.clamp { v.clamp(0.0, 1.0) } else { v })?;
-        }
+            out[i] = if self.clamp { v.clamp(0.0, 1.0) } else { v };
+        });
         Ok(())
     }
 }

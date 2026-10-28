@@ -1,10 +1,10 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::each_cell;
 use crate::{
     access::WriteHandle,
     condition::CompiledCondition,
-    mask::CellMask,
     noise::{Fractal, FractalKind},
     operator::{
         BuildContext, BuildError, Context, Dimensions, OpError, Operator, OperatorType, Scope,
@@ -126,17 +126,15 @@ impl Operator for Noise {
         // field's seed, not a per-cell choice.
         let seed = parts.rng.next_u64() as i64;
         let region = grid.region();
-        let mask = grid
-            .mask(self.when.as_ref())?
-            .unwrap_or_else(|| CellMask::full(region));
-        let layer = grid.scalars_mut(self.layer)?;
+        let mask = grid.mask(self.when.as_ref())?;
+        let out = grid.scalars_mut(self.layer)?.as_mut_slice();
         let f = self.frequency;
-        for c in mask.iter_ones() {
+        each_cell(region, mask.as_ref(), |c, i| {
             let v = self
                 .fractal
                 .sample2(seed, f64::from(c.x) * f, f64::from(c.y) * f);
-            layer.set(c, ((v + 1.0) * 0.5).clamp(0.0, 1.0))?;
-        }
+            out[i] = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
+        });
         Ok(())
     }
 }
