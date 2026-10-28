@@ -1220,3 +1220,75 @@ fn neighbours_needs_a_range_it_can_meet() {
     assert!(compile_json(&json(r#""shape": "all", "min": 8,"#), &w).is_ok());
     assert!(compile_json(&json(r#""min": 6,"#), &world_3d()).is_ok());
 }
+
+// in_object, row by row
+
+/// A 3D grid with boxes inside it, across its edges, one cell thin in x
+/// or y, and of depth 2; kinds `a` and `b`.
+fn boxes() -> (Grid, TileRegistry, Vec<(Bounds, &'static str)>) {
+    let region = Bounds::new(Coord::new(10, 20, 5), GridSize::new(70, 12, 3));
+    let mut grid = Grid::new(region);
+    let rooms = grid.add_layer("rooms", LayerKind::Objects).unwrap();
+    let b = |x, y, z, w, h, d| Bounds::new(Coord::new(x, y, z), GridSize::new(w, h, d));
+    let list = vec![
+        (b(12, 22, 5, 6, 5, 1), "a"),
+        (b(8, 18, 4, 5, 4, 3), "b"),
+        (b(70, 28, 6, 15, 7, 2), "a"),
+        (b(30, 21, 5, 1, 6, 1), "b"),
+        (b(40, 25, 7, 9, 1, 1), "a"),
+        (b(50, 23, 5, 1, 1, 3), "b"),
+        (b(14, 23, 5, 3, 3, 1), "b"),
+    ];
+    let mut ids = crate::object::ObjectIds::default();
+    let mut split = grid.split(&[], &[rooms]).unwrap();
+    let layer = split.writes[0].as_objects_mut().unwrap();
+    for (bbox, kind) in &list {
+        layer.push(&mut ids, *kind, *bbox, vec![]);
+    }
+    drop(split);
+    (grid, TileRegistry::new(["floor"]).unwrap(), list)
+}
+
+#[test]
+fn in_object_by_rows_matches_cell_by_cell() {
+    let (grid, tiles, list) = boxes();
+    for part in ["any", "wall", "inside"] {
+        for kind in [None, Some("b")] {
+            let filter = kind.map_or(String::new(), |k| {
+                format!(r#", "where": [{{"type": "kind_is", "kind": "{k}"}}]"#)
+            });
+            let json =
+                format!(r#"{{"type": "in_object", "layer": "rooms", "part": "{part}"{filter}}}"#);
+            let got = parse(&json)
+                .unwrap()
+                .compile(&grid, &tiles)
+                .unwrap()
+                .prepare(&grid)
+                .unwrap()
+                .eval(grid.bounds());
+            let mut w = MaskWriter::new(grid.bounds());
+            for c in grid.bounds().iter() {
+                w.push(
+                    list.iter()
+                        .filter(|(_, k)| kind.is_none_or(|want| *k == want))
+                        .any(|(b, _)| {
+                            let inside = b.contains(c);
+                            let (x1, y1) = (
+                                b.origin.x + b.size.width as i32 - 1,
+                                b.origin.y + b.size.height as i32 - 1,
+                            );
+                            let ring =
+                                c.x == b.origin.x || c.x == x1 || c.y == b.origin.y || c.y == y1;
+                            inside
+                                && match part {
+                                    "any" => true,
+                                    "wall" => ring,
+                                    _ => !ring,
+                                }
+                        }),
+                );
+            }
+            assert_eq!(got, w.finish(), "{part} {kind:?}");
+        }
+    }
+}

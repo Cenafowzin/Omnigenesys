@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "description": "Masmorra clássica: salas soltas sem se tocar, a árvore mais curta entre elas e alguns laços, corredores pelo caminho mais barato (atravessam parede, não correm junto dela), porta só onde a passagem é de um eixo, início ao acaso e chefe na sala mais longe",
+  "description": "Masmorra clássica: salas soltas sem se tocar, a árvore mais curta entre elas e alguns laços, corredores pelo caminho mais barato (atravessam parede, não correm junto dela) e com parede dos lados, porta só onde a passagem é de um eixo, início ao acaso e chefe na sala mais longe. Os params mudam quantas salas, o tamanho delas e a chance dos laços.",
   "seed": 512,
   "size": {
     "width": 96,
@@ -26,10 +26,49 @@
     "chao_chefe",
     "chao_inicio"
   ],
+  "params": {
+    "poucas_salas": {
+      "type": "integer",
+      "default": 8,
+      "min": 1,
+      "max": 40,
+      "description": "O menor número de salas; menos que isso, o mapa é refeito"
+    },
+    "muitas_salas": {
+      "type": "integer",
+      "default": 14,
+      "min": 1,
+      "max": 40,
+      "description": "O maior número de salas"
+    },
+    "sala_menor": {
+      "type": "integer",
+      "default": 6,
+      "min": 3,
+      "max": 30,
+      "description": "Lado da menor sala, em células, contando a parede"
+    },
+    "sala_maior": {
+      "type": "integer",
+      "default": 11,
+      "min": 3,
+      "max": 30,
+      "description": "Lado da maior sala, em células, contando a parede"
+    },
+    "lacos": {
+      "type": "number",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "description": "Chance de cada laço proposto ficar: 0 é só a árvore, 1 é todo atalho que poupa uma volta longa"
+    }
+  },
   "steps": [
     {
       "id": "rocha",
       "operator": "Fill",
+      "description": "Tudo começa rocha.",
       "config": {
         "layer": "terreno",
         "tile": "pedra"
@@ -38,21 +77,34 @@
     {
       "id": "salas",
       "operator": "PlaceObjects",
+      "description": "Salas soltas ao acaso, de `sala_menor` a `sala_maior` de lado, com pelo menos uma célula de rocha entre duas (Brogue); de `poucas_salas` a `muitas_salas`, e 30 tentativas por sala.",
       "config": {
         "layer": "salas",
         "kind": "sala",
         "count": {
-          "min": 8,
-          "max": 14
+          "min": {
+            "$param": "poucas_salas"
+          },
+          "max": {
+            "$param": "muitas_salas"
+          }
         },
         "size": {
           "width": {
-            "min": 6,
-            "max": 11
+            "min": {
+              "$param": "sala_menor"
+            },
+            "max": {
+              "$param": "sala_maior"
+            }
           },
           "height": {
-            "min": 6,
-            "max": 11
+            "min": {
+              "$param": "sala_menor"
+            },
+            "max": {
+              "$param": "sala_maior"
+            }
           }
         },
         "tries": 30,
@@ -68,6 +120,7 @@
     {
       "id": "arvore",
       "operator": "ConnectObjects",
+      "description": "A árvore mais curta entre os centros das salas (Prim): tudo ligado, sem laço.",
       "config": {
         "objects": "salas",
         "layer": "conexoes",
@@ -78,19 +131,23 @@
     {
       "id": "lacos",
       "operator": "ConnectObjects",
+      "description": "Laços: cada sala com as 3 mais próximas, só se hoje estão a 4 ou mais corredores de distância (um atalho que poupa uma volta longa), com a chance `lacos`.",
       "config": {
         "objects": "salas",
         "layer": "conexoes",
         "strategy": "nearest",
         "k": 3,
         "min_hops": 4,
-        "keep": 0.5,
+        "keep": {
+          "$param": "lacos"
+        },
         "kind": "corredor"
       }
     },
     {
       "id": "paredes",
       "operator": "Fill",
+      "description": "O anel de cada sala é parede.",
       "config": {
         "layer": "terreno",
         "tile": "parede"
@@ -106,6 +163,7 @@
     {
       "id": "pisos",
       "operator": "Fill",
+      "description": "O miolo de cada sala é chão.",
       "config": {
         "layer": "terreno",
         "tile": "chao"
@@ -121,6 +179,7 @@
     {
       "id": "corredores",
       "operator": "CarvePaths",
+      "description": "Cada ligação vira um corredor pelo caminho mais barato (A*), com custos lidos em ordem, a primeira que vale: parede já aberta custa 1 (corredores reaproveitam a porta); canto de sala, bloqueado; parede ao lado de uma já aberta, bloqueada (a porta fica com uma célula); outra parede, 10 (o corredor atravessa a parede uma vez, não corre junto dela); chão, 1; rocha, 2. Cada curva custa 1.",
       "config": {
         "connections": "conexoes",
         "objects": "salas",
@@ -222,6 +281,7 @@
     {
       "id": "portas",
       "operator": "Fill",
+      "description": "Porta onde o corredor cruzou a parede e a passagem é de um eixo só: chão dos dois lados num eixo e nos dois lados do outro não.",
       "config": {
         "layer": "terreno",
         "tile": "porta"
@@ -339,8 +399,35 @@
       ]
     },
     {
+      "id": "paredes_corredor",
+      "operator": "Fill",
+      "description": "A rocha encostada num corredor vira parede, como as salas.",
+      "config": {
+        "layer": "terreno",
+        "tile": "parede"
+      },
+      "conditions": [
+        {
+          "type": "tile_is",
+          "layer": "terreno",
+          "tile": "pedra"
+        },
+        {
+          "type": "neighbours",
+          "shape": "all",
+          "min": 1,
+          "condition": {
+            "type": "tile_is",
+            "layer": "terreno",
+            "tile": "chao"
+          }
+        }
+      ]
+    },
+    {
       "id": "inicio",
       "operator": "TagObjects",
+      "description": "O início é uma sala ao acaso.",
       "config": {
         "layer": "salas",
         "order_by": [
@@ -356,6 +443,7 @@
     {
       "id": "distancia",
       "operator": "MeasureObjects",
+      "description": "Quantos corredores cada sala está do início.",
       "config": {
         "layer": "salas",
         "into": "distancia",
@@ -375,6 +463,7 @@
     {
       "id": "chefe",
       "operator": "TagObjects",
+      "description": "O chefe vai na sala mais longe do início.",
       "config": {
         "layer": "salas",
         "where": [
@@ -401,6 +490,7 @@
     {
       "id": "piso_inicio",
       "operator": "Fill",
+      "description": "Chão do início.",
       "config": {
         "layer": "terreno",
         "tile": "chao_inicio"
@@ -423,6 +513,7 @@
     {
       "id": "piso_chefe",
       "operator": "Fill",
+      "description": "Chão do chefe.",
       "config": {
         "layer": "terreno",
         "tile": "chao_chefe"

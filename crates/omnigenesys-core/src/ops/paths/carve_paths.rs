@@ -253,11 +253,16 @@ impl CarvePaths {
         // 0: no rule has said yet.
         let mut cost = vec![0; region.size.len()];
         for (rule, c) in &self.costs {
-            let holds = grid.mask(rule.as_ref())?;
-            for (k, p) in region.iter().enumerate() {
-                if cost[k] == 0 && holds.as_ref().is_none_or(|m| m.get(p)) {
-                    cost[k] = *c;
+            // The mask covers the region, so its places are the costs'.
+            match grid.mask(rule.as_ref())? {
+                Some(holds) => {
+                    for k in holds.indices() {
+                        if cost[k] == 0 {
+                            cost[k] = *c;
+                        }
+                    }
                 }
+                None => cost.iter_mut().filter(|k| **k == 0).for_each(|k| *k = *c),
             }
         }
         cost.iter_mut().filter(|c| **c == 0).for_each(|c| *c = 1);

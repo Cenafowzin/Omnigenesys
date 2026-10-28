@@ -101,6 +101,45 @@ impl CellMask {
         mask
     }
 
+    /// The places of the true cells in the bounds' order (z → y → x), for a
+    /// caller whose own buffers share these bounds: no coordinate to work
+    /// out per cell.
+    pub(crate) fn indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.words.iter().enumerate().flat_map(|(w, &word)| {
+            let mut word = word;
+            std::iter::from_fn(move || {
+                (word != 0).then(|| {
+                    let bit = word.trailing_zeros() as usize;
+                    word &= word - 1;
+                    w * 64 + bit
+                })
+            })
+        })
+    }
+
+    /// Sets the cells from `x0` to `x1` (both counted) of the row at `y`,
+    /// `z`, as far as the bounds reach: a run, a word at a time.
+    pub(crate) fn set_row(&mut self, y: i64, z: i64, x0: i64, x1: i64) {
+        let b = self.bounds;
+        let (ox, oy, oz) = (
+            i64::from(b.origin.x),
+            i64::from(b.origin.y),
+            i64::from(b.origin.z),
+        );
+        let (w, h, d) = (
+            i64::from(b.size.width),
+            i64::from(b.size.height),
+            i64::from(b.size.depth),
+        );
+        let (ly, lz) = (y - oy, z - oz);
+        let (a, e) = ((x0 - ox).max(0), (x1 - ox).min(w - 1));
+        if ly < 0 || ly >= h || lz < 0 || lz >= d || a > e {
+            return;
+        }
+        let start = ((lz * h + ly) * w + a) as usize;
+        self.set_run(start, (e - a + 1) as usize);
+    }
+
     /// Sets the `len` bits from bit `start`.
     fn set_run(&mut self, start: usize, len: usize) {
         let end = start + len;

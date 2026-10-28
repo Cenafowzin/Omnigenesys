@@ -760,6 +760,15 @@ fn in_object(
     part: Part,
     filter: &CompiledFilter,
 ) -> Result<CellMask, ConditionError> {
+    let mut mask = CellMask::new(grid.bounds());
+    // Without a filter every object counts: no copy of the layers to test
+    // it on (a corridor step prepares this after every path).
+    if filter.is_empty() {
+        for o in grid.objects(layer)?.iter() {
+            paint(&mut mask, o.bbox, part);
+        }
+        return Ok(mask);
+    }
     let mut ids = vec![layer];
     ids.extend(filter.layers().into_iter().filter(|l| *l != layer));
     let layers = ids
@@ -768,36 +777,41 @@ fn in_object(
         .collect::<Result<Vec<_>, GridError>>()?;
     let scene = Scene::new(grid.map(), layers);
     let filter = filter.prepare(grid)?;
-    let region = grid.bounds();
-    let mut hit = vec![false; region.size.len()];
     for (i, o) in scene.objects(layer).iter().enumerate() {
-        if !filter.test(&scene, layer, Subject::Object(i)) {
-            continue;
-        }
-        let b = o.bbox;
-        let (x1, y1) = (
-            i64::from(b.origin.x) + i64::from(b.size.width) - 1,
-            i64::from(b.origin.y) + i64::from(b.size.height) - 1,
-        );
-        for c in b.iter() {
-            let Some(k) = region.index_of(c) else {
-                continue;
-            };
-            let (x, y) = (i64::from(c.x), i64::from(c.y));
-            let ring =
-                x == i64::from(b.origin.x) || x == x1 || y == i64::from(b.origin.y) || y == y1;
-            hit[k] |= match part {
-                Part::Any => true,
-                Part::Wall => ring,
-                Part::Inside => !ring,
-            };
+        if filter.test(&scene, layer, Subject::Object(i)) {
+            paint(&mut mask, o.bbox, part);
         }
     }
-    let mut w = MaskWriter::new(region);
-    for h in hit {
-        w.push(h);
+    Ok(mask)
+}
+
+/// Marks the `part` of the box `b`, row by row: the whole row, its two
+/// ends (the ring is in x and y, at every z), or the row between them.
+fn paint(mask: &mut CellMask, b: Bounds, part: Part) {
+    let (x0, y0, z0) = (
+        i64::from(b.origin.x),
+        i64::from(b.origin.y),
+        i64::from(b.origin.z),
+    );
+    let (x1, y1) = (
+        x0 + i64::from(b.size.width) - 1,
+        y0 + i64::from(b.size.height) - 1,
+    );
+    for z in z0..z0 + i64::from(b.size.depth) {
+        for y in y0..=y1 {
+            let edge = y == y0 || y == y1;
+            match part {
+                Part::Any => mask.set_row(y, z, x0, x1),
+                Part::Wall if edge => mask.set_row(y, z, x0, x1),
+                Part::Wall => {
+                    mask.set_row(y, z, x0, x0);
+                    mask.set_row(y, z, x1, x1);
+                }
+                Part::Inside if edge => {}
+                Part::Inside => mask.set_row(y, z, x0 + 1, x1 - 1),
+            }
+        }
     }
-    Ok(w.finish())
 }
 
 fn window(
