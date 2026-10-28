@@ -10,7 +10,7 @@ pub use combine::{Combine, CombineConfig, CombineInput, CombineOp};
 pub use curve::{Curve, CurveConfig, CurveKind, Interpolation, SmoothOrder};
 pub use linear_gradient::{LinearGradient, LinearGradientConfig};
 pub use noise::{Noise, NoiseConfig, NoiseKind};
-pub use radial_gradient::{RadialGradient, RadialGradientConfig};
+pub use radial_gradient::{RadialGradient, RadialGradientConfig, RadiusOf};
 
 use crate::{bounds::Bounds, coords::Coord, mask::CellMask};
 

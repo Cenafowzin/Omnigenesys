@@ -26,7 +26,7 @@ mod validate;
 pub use field::{
     Combine, CombineConfig, CombineInput, CombineOp, Curve, CurveConfig, CurveKind, Interpolation,
     LinearGradient, LinearGradientConfig, Noise, NoiseConfig, NoiseKind, RadialGradient,
-    RadialGradientConfig, SmoothOrder,
+    RadialGradientConfig, RadiusOf, SmoothOrder,
 };
 pub use objects::{
     ConnectObjects, ConnectObjectsConfig, Count, CountRange, CountWord, Expand, Frontier,

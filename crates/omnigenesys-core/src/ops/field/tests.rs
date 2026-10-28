@@ -183,6 +183,27 @@ fn radial_gradient_follows_its_formula() {
     }
 }
 
+/// With `each_side` the radii are fractions of the width and the height:
+/// on the 8 × 6 map the default square reaches all four edges, 4 cells
+/// across and 3 down, where `shorter_side` makes it 3 both ways.
+#[test]
+fn radial_gradient_radii_can_stretch_with_the_map() {
+    let out = radial(json!({"shape": 1, "radius_of": "each_side"}));
+    for y in 0..6 {
+        for x in 0..8 {
+            let u = ((x as f64 + 0.5) - 4.0) / 4.0;
+            let v = ((y as f64 + 0.5) - 3.0) / 3.0;
+            let want = u.abs().max(v.abs()).min(1.0);
+            assert_eq!(out[y * 8 + x], want as f32, "({x}, {y})");
+        }
+    }
+    assert_ne!(out, radial(json!({"shape": 1})));
+    assert_eq!(
+        radial(json!({})),
+        radial(json!({"radius_of": "shorter_side"}))
+    );
+}
+
 #[test]
 fn radial_gradient_shapes_and_turns() {
     // The defaults: a circle in the middle reaching the nearest edges.

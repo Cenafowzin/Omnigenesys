@@ -14,8 +14,11 @@ use crate::{
 /// at the edge of the shape around it and beyond. The shape is the unit
 /// ball of the Lp norm (a superellipse): diamond at `shape` 0, circle at
 /// 0.5, square at 1, stretched by the two radii and turned by `rotation`.
-/// The centre is placed by the map's width and height, the radii by its
-/// shorter side.
+/// The centre is placed by the map's width and height; the radii are
+/// fractions of its shorter side, so equal radii make a circle on any map,
+/// or with `radius_of: each_side` of the width and the height, so the shape
+/// stretches with the map (Red Blob's falloff: an island that fills the
+/// map's rectangle whatever its size).
 /// A `Curve` step after it shapes the slope; one with `invert` makes it 1
 /// at the centre, as an island wants.
 ///
@@ -32,14 +35,18 @@ pub struct RadialGradientConfig {
     /// The centre down the map: 0 the top edge, 1 the bottom.
     #[serde(default = "half")]
     pub y: f64,
-    /// Half the shape's width, as a fraction of the map's shorter side,
-    /// so equal radii make a circle on any map: 0.5 from the middle
-    /// reaches the two nearest edges.
+    /// Half the shape's width, as a fraction of the map's shorter side
+    /// (or of its width, with `each_side`): 0.5 from the middle reaches the
+    /// two nearest edges.
     #[serde(default = "half")]
     pub radius_x: f64,
-    /// Half the shape's height, as a fraction of the map's shorter side.
+    /// Half the shape's height, as a fraction of the map's shorter side
+    /// (or of its height, with `each_side`).
     #[serde(default = "half")]
     pub radius_y: f64,
+    /// What the radii are fractions of.
+    #[serde(default)]
+    pub radius_of: RadiusOf,
     /// Turns the shape, in degrees, clockwise (y grows downwards).
     #[serde(default)]
     pub rotation: f64,
@@ -54,10 +61,22 @@ fn half() -> f64 {
     0.5
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RadiusOf {
+    /// The map's shorter side, for both: equal radii are a circle.
+    #[default]
+    ShorterSide,
+    /// The width for `radius_x`, the height for `radius_y`: the shape
+    /// stretches with the map.
+    EachSide,
+}
+
 pub struct RadialGradient {
     layer: WriteHandle,
     centre: (f64, f64),
     radius: (f64, f64),
+    radius_of: RadiusOf,
     cos: f64,
     sin: f64,
     norm: Norm,
@@ -140,6 +159,7 @@ impl OperatorType for RadialGradient {
             layer: bcx.write_scalar(&c.layer)?,
             centre: (c.x, c.y),
             radius: (c.radius_x, c.radius_y),
+            radius_of: c.radius_of,
             cos,
             sin,
             norm: Norm::from_shape(c.shape),
@@ -157,8 +177,11 @@ impl Operator for RadialGradient {
         let map = grid.map();
         let (w, h) = (f64::from(map.size.width), f64::from(map.size.height));
         let (cx, cy) = (self.centre.0 * w, self.centre.1 * h);
-        let side = w.min(h);
-        let (rx, ry) = (self.radius.0 * side, self.radius.1 * side);
+        let (sx, sy) = match self.radius_of {
+            RadiusOf::ShorterSide => (w.min(h), w.min(h)),
+            RadiusOf::EachSide => (w, h),
+        };
+        let (rx, ry) = (self.radius.0 * sx, self.radius.1 * sy);
         let out = grid.scalars_mut(self.layer)?.as_mut_slice();
         each_cell(region, mask.as_ref(), |c, i| {
             // From the centre to the centre of the cell, in cells, turned

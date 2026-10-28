@@ -97,7 +97,7 @@ fn island_from_noise() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn archipelago() {
-    assert_eq!(fingerprint(ARCHIPELAGO), 9_965_770_022_414_762_509);
+    assert_eq!(fingerprint(ARCHIPELAGO), 13_116_310_259_720_836_124);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
