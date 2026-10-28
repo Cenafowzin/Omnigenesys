@@ -15,25 +15,25 @@
   ],
   "tiles": ["chao", "parede", "porta", "porta_secreta", "chao_inicio", "chao_chefe", "chao_loja", "chao_tesouro", "chao_sacrificio", "chao_secreto"],
   "steps": [
-    {"id": "inicio", "operator": "PlaceObjects", "config": {
+    {"id": "inicio", "operator": "PlaceObjects", "description": "A sala do início, no meio da grade 9 × 8.", "config": {
       "layer": "salas", "kind": "sala",
       "where": [{"type": "slot", "x": 4, "y": 4}],
       "props": {"role": "inicio"}}},
-    {"id": "crescer", "operator": "GrowObjects", "config": {
+    {"id": "crescer", "operator": "GrowObjects", "description": "Rebirth: a partir do início, cada sala tenta abrir as casas vazias ao lado (50% cada), só onde a casa nova encostaria em uma sala só; para no número de salas do estágio.", "config": {
       "layer": "salas",
       "from": [{"type": "prop_is", "name": "role", "value": "inicio"}],
       "count": {"min": {"$expr": "salas - 1"}, "max": {"$expr": "min(20, salas + 1) - 1"}},
       "where": [{"type": "neighbours", "max": 1}],
       "chance": 0.5, "pick": "oldest", "expand": "all", "retire": "visit",
       "on_exhausted": {"$expr": "if(salas > 16, \"reseed\", \"stop\")"}}},
-    {"id": "becos", "operator": "Check", "config": {
+    {"id": "becos", "operator": "Check", "description": "Rebirth refaz o andar se faltarem becos: aqui os que esta receita usa, 4 até o estágio 6 (chefe, loja, tesouro e o sacrifício que às vezes vem) e 2 depois (chefe e sacrifício). O jogo pede 5 porque põe mais especiais.", "config": {
       "objects": "salas",
       "where": [{"type": "neighbours", "max": 1}, {"type": "not", "filter": {"type": "has_prop", "name": "role"}}],
-      "min": 4, "message": "becos sem saída de menos para as salas especiais"}},
-    {"id": "distancia", "operator": "MeasureObjects", "config": {
+      "min": {"$expr": "if(estagio < 7, 4, 2)"}, "message": "becos sem saída de menos para as salas especiais"}},
+    {"id": "distancia", "operator": "MeasureObjects", "description": "Quantas portas cada sala está do início.", "config": {
       "layer": "salas", "into": "distancia",
       "measure": {"type": "distance", "from": [{"type": "prop_is", "name": "role", "value": "inicio"}]}}},
-    {"id": "chefe", "operator": "TagObjects", "config": {
+    {"id": "chefe", "operator": "TagObjects", "description": "O chefe vai no beco mais longe do início, e nunca vizinho dele.", "config": {
       "layer": "salas",
       "where": [
         {"type": "neighbours", "max": 1},
@@ -41,64 +41,66 @@
         {"type": "neighbours", "max": 0, "where": [{"type": "prop_is", "name": "role", "value": "inicio"}]}],
       "order_by": [{"by": "prop", "name": "distancia", "desc": true}],
       "set": {"role": "chefe"}}},
-    {"id": "loja", "operator": "TagObjects", "config": {
+    {"id": "loja", "operator": "TagObjects", "description": "A loja num beco que sobrou, ao acaso; só até o estágio 6.", "config": {
       "layer": "salas",
       "where": [{"type": "neighbours", "max": 1}, {"type": "not", "filter": {"type": "has_prop", "name": "role"}}],
       "order_by": [{"by": "random"}],
+      "count": {"$expr": "if(estagio < 7, 1, 0)"},
       "set": {"role": "loja"}}},
-    {"id": "tesouro", "operator": "TagObjects", "config": {
+    {"id": "tesouro", "operator": "TagObjects", "description": "O tesouro num beco que sobrou, ao acaso; só até o estágio 6.", "config": {
       "layer": "salas",
       "where": [{"type": "neighbours", "max": 1}, {"type": "not", "filter": {"type": "has_prop", "name": "role"}}],
       "order_by": [{"by": "random"}],
+      "count": {"$expr": "if(estagio < 7, 1, 0)"},
       "set": {"role": "tesouro"}}},
-    {"id": "sacrificio", "operator": "TagObjects", "config": {
+    {"id": "sacrificio", "operator": "TagObjects", "description": "O sacrifício, 1 vez em 7, num beco que sobrou.", "config": {
       "layer": "salas",
       "where": [{"type": "neighbours", "max": 1}, {"type": "not", "filter": {"type": "has_prop", "name": "role"}}],
       "order_by": [{"by": "random"}],
       "count": {"min": 0, "max": 1}, "chance": {"$expr": "1 / 7"},
       "set": {"role": "sacrificio"}}},
-    {"id": "super_secreta", "operator": "PlaceObjects", "config": {
+    {"id": "super_secreta", "operator": "PlaceObjects", "description": "A super secreta numa casa vazia com exatamente 1 sala ao lado, nenhuma especial.", "config": {
       "layer": "salas", "kind": "sala",
       "where": [
         {"type": "neighbours", "min": 1, "max": 1},
         {"type": "neighbours", "max": 0, "where": [{"type": "has_prop", "name": "role"}]}],
       "order_by": [{"by": "random"}],
       "props": {"role": "super_secreta"}}},
-    {"id": "secreta", "operator": "PlaceObjects", "config": {
+    {"id": "secreta", "operator": "PlaceObjects", "description": "A secreta numa casa vazia que prefere mais salas em volta (pesos do Rebirth), nunca encostada no chefe nem na super.", "config": {
       "layer": "salas", "kind": "sala",
       "where": [
         {"type": "neighbours", "min": 1},
         {"type": "neighbours", "max": 0, "where": [{"type": "prop_is", "name": "role", "value": ["chefe", "super_secreta"]}]}],
       "order_by": [{"by": "score", "expr": "10 + floor(random * 5) - if(neighbours == 2, 3, if(neighbours == 1, 6, 0))", "desc": true}],
       "props": {"role": "secreta"}}},
-    {"id": "portas", "operator": "ConnectObjects", "config": {
+    {"id": "portas", "operator": "ConnectObjects", "description": "Uma porta entre cada duas salas vizinhas.", "config": {
       "objects": "salas", "layer": "conexoes", "strategy": "neighbours", "kind": "porta"}},
-    {"id": "passagens", "operator": "TagObjects", "config": {
+    {"id": "passagens", "operator": "TagObjects", "description": "As portas que dão nas secretas ficam secretas.", "config": {
       "layer": "conexoes", "count": "all",
       "where": [{"type": "refers_to", "props": ["from", "to"], "layer": "salas",
         "where": [{"type": "prop_is", "name": "role", "value": ["secreta", "super_secreta"]}]}],
       "set": {"secreta": true}}},
-    {"id": "paredes", "operator": "Fill", "config": {"layer": "terreno", "tile": "parede"},
+    {"id": "paredes", "operator": "Fill", "description": "O anel de cada sala é parede.", "config": {"layer": "terreno", "tile": "parede"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "wall"}]},
-    {"id": "pisos", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao"},
+    {"id": "pisos", "operator": "Fill", "description": "O miolo de cada sala é chão.", "config": {"layer": "terreno", "tile": "chao"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "inside"}]},
-    {"id": "vaos", "operator": "Fill", "config": {"layer": "terreno", "tile": "porta"},
+    {"id": "vaos", "operator": "Fill", "description": "Onde uma porta cruza a parede, abre o vão.", "config": {"layer": "terreno", "tile": "porta"},
       "conditions": [{"type": "in_object", "layer": "conexoes"}, {"type": "tile_is", "layer": "terreno", "tile": "parede"}]},
-    {"id": "vaos_secretos", "operator": "Fill", "config": {"layer": "terreno", "tile": "porta_secreta"},
+    {"id": "vaos_secretos", "operator": "Fill", "description": "Os vãos das portas secretas ficam escondidos.", "config": {"layer": "terreno", "tile": "porta_secreta"},
       "conditions": [
         {"type": "in_object", "layer": "conexoes", "where": [{"type": "prop_is", "name": "secreta", "value": true}]},
         {"type": "tile_is", "layer": "terreno", "tile": "porta"}]},
-    {"id": "piso_inicio", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao_inicio"},
+    {"id": "piso_inicio", "operator": "Fill", "description": "O chão de cada papel tem o seu tile: início.", "config": {"layer": "terreno", "tile": "chao_inicio"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "inside", "where": [{"type": "prop_is", "name": "role", "value": "inicio"}]}]},
-    {"id": "piso_chefe", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao_chefe"},
+    {"id": "piso_chefe", "operator": "Fill", "description": "Chão do chefe.", "config": {"layer": "terreno", "tile": "chao_chefe"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "inside", "where": [{"type": "prop_is", "name": "role", "value": "chefe"}]}]},
-    {"id": "piso_loja", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao_loja"},
+    {"id": "piso_loja", "operator": "Fill", "description": "Chão da loja.", "config": {"layer": "terreno", "tile": "chao_loja"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "inside", "where": [{"type": "prop_is", "name": "role", "value": "loja"}]}]},
-    {"id": "piso_tesouro", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao_tesouro"},
+    {"id": "piso_tesouro", "operator": "Fill", "description": "Chão do tesouro.", "config": {"layer": "terreno", "tile": "chao_tesouro"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "inside", "where": [{"type": "prop_is", "name": "role", "value": "tesouro"}]}]},
-    {"id": "piso_sacrificio", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao_sacrificio"},
+    {"id": "piso_sacrificio", "operator": "Fill", "description": "Chão do sacrifício.", "config": {"layer": "terreno", "tile": "chao_sacrificio"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "inside", "where": [{"type": "prop_is", "name": "role", "value": "sacrificio"}]}]},
-    {"id": "piso_secreto", "operator": "Fill", "config": {"layer": "terreno", "tile": "chao_secreto"},
+    {"id": "piso_secreto", "operator": "Fill", "description": "Chão das secretas.", "config": {"layer": "terreno", "tile": "chao_secreto"},
       "conditions": [{"type": "in_object", "layer": "salas", "part": "inside", "where": [{"type": "prop_is", "name": "role", "value": ["secreta", "super_secreta"]}]}]}
   ]
 }
