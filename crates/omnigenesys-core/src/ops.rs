@@ -29,8 +29,8 @@ pub use field::{
     RadialGradientConfig, RadiusOf, SmoothOrder,
 };
 pub use objects::{
-    ConnectObjects, ConnectObjectsConfig, Count, CountRange, CountWord, Expand, Frontier,
-    GrowObjects, GrowObjectsConfig, Link, Measure, MeasureObjects, MeasureObjectsConfig,
+    Anchor, AnchorAxis, ConnectObjects, ConnectObjectsConfig, Count, CountRange, CountWord, Expand,
+    Frontier, GrowObjects, GrowObjectsConfig, Link, Measure, MeasureObjects, MeasureObjectsConfig,
     OnExhausted, OrderKey, PlaceObjects, PlaceObjectsConfig, Retire, Side, Size, TagObjects,
     TagObjectsConfig,
 };

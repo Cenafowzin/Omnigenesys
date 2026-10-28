@@ -799,3 +799,105 @@ fn a_bad_filter_points_at_its_field() {
         e[0].message
     );
 }
+
+// at: one place, by fractions of the map and a pivot of the box
+
+fn at(kind: &str, size: Json, at: Json) -> Json {
+    json!({"id": kind, "operator": "PlaceObjects", "config": {
+        "layer": "solta", "kind": kind, "size": size, "at": at}})
+}
+
+/// On the 135 × 72 map: the spawn at the bottom centre 3 cells up, the
+/// gate 4 × 4 at the top centre, a box flush in the bottom-right corner.
+#[test]
+fn at_puts_the_box_on_its_anchor() {
+    let g = run(&pipeline(json!([
+        at(
+            "spawn",
+            json!({"width": 1, "height": 1}),
+            json!({"x": {"frac": 0.5}, "y": {"frac": 1, "offset": -3}, "pivot": [0.5, 1]})
+        ),
+        at(
+            "portao",
+            json!({"width": 4, "height": 4}),
+            json!({"x": {"frac": 0.5}, "y": {"frac": 0}, "pivot": [0.5, 0]})
+        ),
+        at(
+            "canto",
+            json!({"width": 5, "height": 3}),
+            json!({"x": {"frac": 1}, "y": {"frac": 1}, "pivot": [1, 1]})
+        ),
+    ])));
+    let boxes: Vec<(String, i32, i32, u32, u32)> = objects(&g, "solta")
+        .iter()
+        .map(|o| {
+            (
+                o.kind.clone(),
+                o.bbox.origin.x,
+                o.bbox.origin.y,
+                o.bbox.size.width,
+                o.bbox.size.height,
+            )
+        })
+        .collect();
+    assert_eq!(
+        boxes,
+        [
+            // floor(0.5 · 134) = 67; 71 − 3 = 68.
+            ("spawn".to_string(), 67, 68, 1, 1),
+            // 67 − floor(0.5 · 3) = 66.
+            ("portao".to_string(), 66, 0, 4, 4),
+            ("canto".to_string(), 130, 69, 5, 3),
+        ]
+    );
+}
+
+#[test]
+fn at_still_answers_to_where_and_to_the_map() {
+    // Off the map: the step fails, and says why.
+    let off = at(
+        "fora",
+        json!({"width": 3, "height": 3}),
+        json!({"x": {"frac": 0}, "y": {"frac": 0, "offset": -1}}),
+    );
+    let e = run_seed(&pipeline(json!([off])), 512).unwrap_err();
+    assert!(e.contains("does not fit in the map"), "{e}");
+    // A second box on the same anchor overlaps the first: `where` refuses it.
+    let mut twice = at(
+        "dois",
+        json!({"width": 3, "height": 3}),
+        json!({"x": {"frac": 0.5}, "y": {"frac": 0.5}}),
+    );
+    twice["config"]["count"] = json!(2);
+    twice["config"]["where"] = json!([{"type": "overlaps", "max": 0}]);
+    let e = run_seed(&pipeline(json!([twice])), 512).unwrap_err();
+    assert!(e.contains("placed 1, fewer than the 2"), "{e}");
+}
+
+#[test]
+fn at_is_checked_when_built() {
+    let bad = |step: Json| {
+        build(&pipeline(json!([step]))).err().unwrap()[0]
+            .message
+            .clone()
+    };
+    let spot = json!({"x": {"frac": 0.5}, "y": {"frac": 0.5}});
+    let mut tries = at("a", json!({"width": 1, "height": 1}), spot.clone());
+    tries["config"]["tries"] = json!(5);
+    assert!(bad(tries).contains("one place"));
+    let far = at(
+        "a",
+        json!({"width": 1, "height": 1}),
+        json!({"x": {"frac": 1.5}, "y": {"frac": 0}}),
+    );
+    assert!(bad(far).contains("1.5 is not between 0 and 1"));
+    let pivot = at(
+        "a",
+        json!({"width": 1, "height": 1}),
+        json!({"x": {"frac": 0}, "y": {"frac": 0}, "pivot": [0, -1]}),
+    );
+    assert!(bad(pivot).contains("-1 is not between 0 and 1"));
+    let lattice = json!({"id": "a", "operator": "PlaceObjects", "config": {
+        "layer": "salas", "kind": "x", "at": spot}});
+    assert!(bad(lattice).contains("has a lattice"));
+}

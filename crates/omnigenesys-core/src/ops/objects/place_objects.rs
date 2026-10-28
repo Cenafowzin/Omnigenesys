@@ -36,6 +36,11 @@ use super::common::{
 ///   Wolverson's tutorial; with one, the best of them — Mitchell's best
 ///   candidate (pesquisa 2026-10-26-masmorra-em-metodos, item 1). Rooms
 ///   kept one cell apart: `where: overlaps {margin: 1, max: 0}`.
+/// - With `at`, the one place a box of `size` goes, still checked by
+///   `where`: a point of the map, and the point of the box that sits on
+///   it — the anchors and pivot of Unity's RectTransform, in fractions so
+///   it holds on a map of any size (pesquisa
+///   2026-10-27-espalhar-ancoras-e-variantes, §3).
 #[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlaceObjectsConfig {
@@ -49,6 +54,10 @@ pub struct PlaceObjectsConfig {
     /// candidate. With one, the slot gives the size.
     #[serde(default)]
     pub size: Option<Size>,
+    /// Without a lattice: the one place each box goes, instead of drawing
+    /// places at random.
+    #[serde(default)]
+    pub at: Option<Anchor>,
     /// Without a lattice: boxes drawn for each object (1 to 1000; 30 if
     /// left out).
     #[serde(default)]
@@ -70,6 +79,39 @@ pub struct PlaceObjectsConfig {
     /// Props every new object gets.
     #[serde(default)]
     pub props: BTreeMap<String, Scalar>,
+}
+
+/// A point of the map, and which point of the box sits on it. A spawn at
+/// the bottom centre, 3 cells up from the edge: `{"x": {"frac": 0.5},
+/// "y": {"frac": 1, "offset": -3}, "pivot": [0.5, 1]}`.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Anchor {
+    /// Across the map: 0 the left edge, 1 the right.
+    pub x: AnchorAxis,
+    /// Down the map: 0 the top edge, 1 the bottom.
+    pub y: AnchorAxis,
+    /// The point of the box on the anchor, as fractions of its width and
+    /// height (0 its left or top cell, 1 its right or bottom one); its
+    /// middle if left out.
+    #[serde(default = "middle")]
+    pub pivot: [f64; 2],
+}
+
+/// A fraction of the map along one axis (0 to 1; its cell rounded down),
+/// then a number of cells from there.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorAxis {
+    #[serde(default)]
+    #[schemars(range(min = 0, max = 1))]
+    pub frac: f64,
+    #[serde(default)]
+    pub offset: i32,
+}
+
+fn middle() -> [f64; 2] {
+    [0.5, 0.5]
 }
 
 /// A box's width and height, in cells; each is a whole number or a range
@@ -105,6 +147,11 @@ enum Places {
         height: (u32, u32),
         tries: u32,
     },
+    At {
+        anchor: Anchor,
+        width: (u32, u32),
+        height: (u32, u32),
+    },
 }
 
 pub struct PlaceObjects {
@@ -134,6 +181,15 @@ impl OperatorType for PlaceObjects {
         };
         let layer = bcx.write_objects(&c.layer)?;
         let places = match (bcx.lattice(layer.layer()), c.size) {
+            (Some(_), _) if c.at.is_some() => {
+                return Err(invalid(
+                    "at",
+                    format!(
+                        "layer '{}' has a lattice: pick the slot with `where: slot`",
+                        c.layer
+                    ),
+                ));
+            }
             (Some(lattice), None) => {
                 if c.tries.is_some() {
                     return Err(invalid(
@@ -172,17 +228,46 @@ impl OperatorType for PlaceObjects {
                         "without a lattice there is no \"all\": give a number or a range".into(),
                     ));
                 }
-                let tries = c.tries.unwrap_or(DEFAULT_TRIES);
-                if !(1..=MAX_TRIES).contains(&tries) {
-                    return Err(invalid(
-                        "tries",
-                        format!("{tries} is not between 1 and {MAX_TRIES}"),
-                    ));
-                }
-                Places::Drawn {
-                    width: side(size.width, "size.width")?,
-                    height: side(size.height, "size.height")?,
-                    tries,
+                let (width, height) = (
+                    side(size.width, "size.width")?,
+                    side(size.height, "size.height")?,
+                );
+                if let Some(anchor) = c.at {
+                    if c.tries.is_some() {
+                        return Err(invalid(
+                            "tries",
+                            "with `at` there is one place, nothing is drawn".into(),
+                        ));
+                    }
+                    let axes = [
+                        ("at/x/frac", anchor.x.frac),
+                        ("at/y/frac", anchor.y.frac),
+                        ("at/pivot/0", anchor.pivot[0]),
+                        ("at/pivot/1", anchor.pivot[1]),
+                    ];
+                    for (field, v) in axes {
+                        if !(0.0..=1.0).contains(&v) {
+                            return Err(invalid(field, format!("{v} is not between 0 and 1")));
+                        }
+                    }
+                    Places::At {
+                        anchor,
+                        width,
+                        height,
+                    }
+                } else {
+                    let tries = c.tries.unwrap_or(DEFAULT_TRIES);
+                    if !(1..=MAX_TRIES).contains(&tries) {
+                        return Err(invalid(
+                            "tries",
+                            format!("{tries} is not between 1 and {MAX_TRIES}"),
+                        ));
+                    }
+                    Places::Drawn {
+                        width,
+                        height,
+                        tries,
+                    }
                 }
             }
         };
@@ -214,14 +299,35 @@ fn side(s: Side, field: &str) -> Result<(u32, u32), BuildError> {
     Ok((lo, hi))
 }
 
+/// The `w` × `h` box at `anchor`, if it fits inside the map. The anchor
+/// cell is `floor(frac · (side − 1)) + offset` from the map's corner, and
+/// the box's `floor(pivot · (size − 1))` cell sits on it: whole cells, the
+/// same on every target.
+fn anchored(map: Bounds, anchor: Anchor, w: u32, h: u32) -> Option<Bounds> {
+    let at = |frac: f64, side: u32, offset: i32| {
+        (frac * f64::from(side - 1)).floor() as i64 + i64::from(offset)
+    };
+    let back = |pivot: f64, size: u32| (pivot * f64::from(size - 1)).floor() as i64;
+    let x = at(anchor.x.frac, map.size.width, anchor.x.offset) - back(anchor.pivot[0], w);
+    let y = at(anchor.y.frac, map.size.height, anchor.y.offset) - back(anchor.pivot[1], h);
+    let fits = |p: i64, size: u32, side: u32| p >= 0 && p + i64::from(size) <= i64::from(side);
+    (fits(x, w, map.size.width) && fits(y, h, map.size.height)).then(|| {
+        Bounds::new(
+            map.origin + Coord::new(x as i32, y as i32, 0),
+            GridSize::new(w, h, 1),
+        )
+    })
+}
+
 /// A whole number from `lo` to `hi`, both counted.
 fn between(rng: &mut StepRng, (lo, hi): (u32, u32)) -> u32 {
     lo + pick(rng.next_u32(), hi - lo + 1)
 }
 
 impl Places {
-    /// This pick's candidates: the empty slots, or boxes drawn inside the
-    /// map (a box larger than the map is no candidate).
+    /// This pick's candidates: the empty slots, boxes drawn inside the map,
+    /// or the box at the anchor (a box that does not fit inside the map is
+    /// no candidate).
     fn candidates(
         self,
         scene: &crate::filter::Scene,
@@ -254,6 +360,17 @@ impl Places {
                     )))
                 })
                 .collect(),
+            Places::At {
+                anchor,
+                width,
+                height,
+            } => {
+                let (w, h) = (between(rng, width), between(rng, height));
+                anchored(map, anchor, w, h)
+                    .map(Subject::Box)
+                    .into_iter()
+                    .collect()
+            }
         }
     }
 }
@@ -311,6 +428,9 @@ impl Operator for PlaceObjects {
                 Places::Slots(_) => "no other empty slot passes `where`".to_string(),
                 Places::Drawn { tries, .. } => {
                     format!("none of the {tries} boxes drawn for the next one passes `where`")
+                }
+                Places::At { .. } => {
+                    "the box at `at` does not fit in the map or does not pass `where`".to_string()
                 }
             };
             return Err(too_few("placed", got, self.amount.min(), &why));
