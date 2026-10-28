@@ -155,6 +155,27 @@ pub enum ObjectFilter {
         #[serde(rename = "where", default)]
         filter: Vec<ObjectFilter>,
     },
+    /// How far the nearest object of the same layer that passes `where` is
+    /// from it, from `min` to `max` cells (both counted; either may be left
+    /// out): the gap between the two boxes, the cells strictly between them
+    /// (boxes side by side are 0 apart, as are boxes that overlap). The
+    /// bonfires apart: `where: [kind_is bonfire], min: 20`; within reach
+    /// of a well: `max: 6`. With no such object the distance is endless:
+    /// `min` holds and `max` does not. `metric` says how the gaps along the
+    /// axes add up: `chebyshev` (the larger, as `overlaps` counts its
+    /// margin), `euclidean` (as the crow flies) or `manhattan` (their sum).
+    /// Unreal PCG's Distance node and Valheim's `MinDistanceFromSimilar` (pesquisa
+    /// 2026-10-27-espalhar-ancoras-e-variantes, §1).
+    Distance {
+        #[serde(rename = "where", default)]
+        filter: Vec<ObjectFilter>,
+        #[serde(default)]
+        min: Option<u32>,
+        #[serde(default)]
+        max: Option<u32>,
+        #[serde(default)]
+        metric: Metric,
+    },
     /// Its place on the layer's lattice: column `x` and row `y`, from 0
     /// (for an object that covers several slots, its first, row by row).
     Slot {
@@ -193,6 +214,50 @@ pub enum ObjectFilter {
     Not {
         filter: Box<ObjectFilter>,
     },
+}
+
+/// How the gaps along the axes make one distance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Metric {
+    /// The largest gap: a square around the box.
+    #[default]
+    Chebyshev,
+    /// As the crow flies: a circle.
+    Euclidean,
+    /// The gaps added: a diamond.
+    Manhattan,
+}
+
+impl Metric {
+    /// The distance between `a` and `b`, the cells strictly between them
+    /// along each axis put together; for `euclidean` its square, so it
+    /// stays a whole number and compares the same.
+    pub fn between(self, a: Bounds, b: Bounds) -> u64 {
+        let gap = |p: i32, pn: u32, q: i32, qn: u32| {
+            let (p0, p1) = (i64::from(p), i64::from(p) + i64::from(pn) - 1);
+            let (q0, q1) = (i64::from(q), i64::from(q) + i64::from(qn) - 1);
+            (q0 - p1 - 1).max(p0 - q1 - 1).max(0) as u64
+        };
+        let g = [
+            gap(a.origin.x, a.size.width, b.origin.x, b.size.width),
+            gap(a.origin.y, a.size.height, b.origin.y, b.size.height),
+            gap(a.origin.z, a.size.depth, b.origin.z, b.size.depth),
+        ];
+        match self {
+            Metric::Chebyshev => g[0].max(g[1]).max(g[2]),
+            Metric::Euclidean => g.iter().map(|d| d * d).sum(),
+            Metric::Manhattan => g.iter().sum(),
+        }
+    }
+
+    /// A bound in cells, as `between` measures it.
+    fn bound(self, cells: u32) -> u64 {
+        match self {
+            Metric::Euclidean => u64::from(cells) * u64::from(cells),
+            _ => u64::from(cells),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -256,6 +321,12 @@ enum F {
         margin: u32,
         min: u32,
         max: u32,
+        filter: Vec<F>,
+    },
+    Distance {
+        min: u64,
+        max: u64,
+        metric: Metric,
         filter: Vec<F>,
     },
     Slot {
@@ -340,7 +411,9 @@ impl PreparedFilter<'_> {
 fn layers(fs: &[F], out: &mut Vec<LayerId>) {
     for f in fs {
         match f {
-            F::Neighbours { filter, .. } | F::Overlaps { filter, .. } => layers(filter, out),
+            F::Neighbours { filter, .. }
+            | F::Overlaps { filter, .. }
+            | F::Distance { filter, .. } => layers(filter, out),
             F::RefersTo { layer, filter, .. } => {
                 if !out.contains(layer) {
                     out.push(*layer);
@@ -417,6 +490,24 @@ impl Compiler<'_> {
                     margin: *margin,
                     min,
                     max,
+                    filter: self.all(filter, layer)?,
+                }
+            }
+            ObjectFilter::Distance {
+                filter,
+                min,
+                max,
+                metric,
+            } => {
+                let (lo, hi) = count_range("distance", *min, *max)?;
+                F::Distance {
+                    min: metric.bound(lo),
+                    max: if max.is_some() {
+                        metric.bound(hi)
+                    } else {
+                        u64::MAX
+                    },
+                    metric: *metric,
                     filter: self.all(filter, layer)?,
                 }
             }
@@ -578,6 +669,17 @@ fn test(f: &F, cells: &[CellMask], scene: &Scene, layer: LayerId, subject: Subje
                 .filter(|&j| passes(filter, j))
                 .count();
             within(n, *min, *max)
+        }
+        F::Distance {
+            min,
+            max,
+            metric,
+            filter,
+        } => {
+            let d = scene
+                .nearest(layer, subject, *metric, |j| passes(filter, j))
+                .unwrap_or(u64::MAX);
+            *min <= d && d <= *max
         }
         F::Slot { x, y } => scene.slot_of(layer, subject).is_some_and(|(c, r)| {
             (x.0..=x.1).contains(&i64::from(c)) && (y.0..=y.1).contains(&i64::from(r))
@@ -805,6 +907,24 @@ impl Scene {
         (0..objects.len()).filter(move |&j| {
             subject != Subject::Object(j) && b.is_some_and(|b| touching(b, objects[j].bbox))
         })
+    }
+
+    /// The distance from `subject` to the nearest object of `layer` for
+    /// which `passes` holds (not `subject` itself), as `metric` measures
+    /// it; `None` when there is none.
+    pub fn nearest(
+        &self,
+        layer: LayerId,
+        subject: Subject,
+        metric: Metric,
+        mut passes: impl FnMut(usize) -> bool,
+    ) -> Option<u64> {
+        let b = self.bounds(layer, subject)?;
+        let objects = &self.layer(layer).objects;
+        (0..objects.len())
+            .filter(|&j| subject != Subject::Object(j) && passes(j))
+            .map(|j| metric.between(b, objects[j].bbox))
+            .min()
     }
 
     /// The objects `subject`'s box overlaps once grown by `margin`, in the

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use crate::{
     access::{ReadHandle, WriteHandle},
     expr::{self, Expr, Type},
-    filter::{CompiledFilter, ObjectFilter, PreparedFilter, Scalar, Scene, Subject},
+    filter::{CompiledFilter, Metric, ObjectFilter, PreparedFilter, Scalar, Scene, Subject},
     grid::{LayerId, Split},
     object::Value,
     operator::{BuildContext, BuildError, GridView, OpError},
@@ -128,6 +128,20 @@ pub enum OrderKey {
         #[serde(default)]
         desc: bool,
     },
+    /// How far the nearest object that passes `where` is, measured as the
+    /// `distance` filter measures it: `desc` puts the farthest first (the
+    /// farthest-first spread of Gonzalez; pesquisa
+    /// 2026-10-27-espalhar-ancoras-e-variantes, §1). Candidates with no
+    /// such object go last either way. Alone it pushes towards corners:
+    /// pair it with a limit (`edge_distance`, a `distance` max).
+    Distance {
+        #[serde(rename = "where", default)]
+        filter: Vec<ObjectFilter>,
+        #[serde(default)]
+        metric: Metric,
+        #[serde(default)]
+        desc: bool,
+    },
     /// An expression over `neighbours` (objects side by side, a whole
     /// number) and `random` (fresh for each candidate, from 0 to below 1):
     /// Isaac Rebirth's secret room weighs `10 + floor(random * 5)`, minus
@@ -144,6 +158,7 @@ enum Key {
     Random,
     Prop(String),
     Neighbours(CompiledFilter),
+    Distance(CompiledFilter, Metric),
     Score { expr: Expr, random: bool },
 }
 
@@ -174,6 +189,14 @@ impl Order {
                     Key::Neighbours(bcx.filter("order_by", filter, layer)?),
                     *desc,
                 ),
+                OrderKey::Distance {
+                    filter,
+                    metric,
+                    desc,
+                } => (
+                    Key::Distance(bcx.filter("order_by", filter, layer)?, *metric),
+                    *desc,
+                ),
                 OrderKey::Score { expr: text, desc } => {
                     let e = Expr::parse(text)
                         .map_err(|e| invalid(format!("score `{text}`: {}", e.message)))?;
@@ -201,7 +224,7 @@ impl Order {
             .keys
             .iter()
             .map(|(k, _)| match k {
-                Key::Neighbours(f) => grid.prepare_filter(f).map(Some),
+                Key::Neighbours(f) | Key::Distance(f, _) => grid.prepare_filter(f).map(Some),
                 _ => Ok(None),
             })
             .collect::<Result<_, OpError>>()?;
@@ -284,6 +307,13 @@ impl Sorting<'_> {
                 Subject::Slot(_) | Subject::Box(_) => None,
             },
             Key::Neighbours(_) => Some(neighbours(filter) as f64),
+            // Whole numbers up to 2^53 are exact in f64: the order is the
+            // distances' own.
+            Key::Distance(_, metric) => scene
+                .nearest(layer, c, *metric, |j| {
+                    filter.is_none_or(|f| f.test(scene, layer, Subject::Object(j)))
+                })
+                .map(|d| d as f64),
             Key::Score { expr, random } => {
                 let n = neighbours(None) as i64;
                 let r = if *random { unit(rng.next_u32()) } else { 0.0 };

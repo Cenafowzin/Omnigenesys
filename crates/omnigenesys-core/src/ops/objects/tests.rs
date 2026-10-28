@@ -901,3 +901,77 @@ fn at_is_checked_when_built() {
         "layer": "salas", "kind": "x", "at": spot}});
     assert!(bad(lattice).contains("has a lattice"));
 }
+
+// distance: apart from each other, away from the spawn, farthest first
+
+fn bonfires(extra: Json) -> Json {
+    let mut step = json!({"id": "fogueiras", "operator": "PlaceObjects", "config": {
+        "layer": "solta", "kind": "fogueira", "count": 3, "size": {"width": 4, "height": 2},
+        "where": [
+            {"type": "distance", "where": [{"type": "kind_is", "kind": "fogueira"}], "min": 30},
+            {"type": "distance", "where": [{"type": "kind_is", "kind": "spawn"}], "min": 25}]}});
+    step["config"]
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    step
+}
+
+fn spawn() -> Json {
+    at(
+        "spawn",
+        json!({"width": 1, "height": 1}),
+        json!({"x": {"frac": 0.5}, "y": {"frac": 1, "offset": -3}, "pivot": [0.5, 1]}),
+    )
+}
+
+#[test]
+fn distance_keeps_objects_apart_and_away() {
+    use crate::filter::Metric;
+    let p = pipeline(json!([spawn(), bonfires(json!({"tries": 200}))]));
+    let mut made = 0;
+    for seed in 1..=20 {
+        // A seed whose draws leave no room fails, for `attempts` to retry.
+        let Ok(g) = run_seed(&p, seed) else { continue };
+        made += 1;
+        let all = objects(&g, "solta");
+        let spawn = all.iter().find(|o| o.kind == "spawn").unwrap().bbox;
+        let fires: Vec<_> = all
+            .iter()
+            .filter(|o| o.kind == "fogueira")
+            .map(|o| o.bbox)
+            .collect();
+        assert_eq!(fires.len(), 3);
+        for (i, a) in fires.iter().enumerate() {
+            assert!(Metric::Chebyshev.between(*a, spawn) >= 25, "seed {seed}");
+            for b in &fires[i + 1..] {
+                assert!(
+                    Metric::Chebyshev.between(*a, *b) >= 30,
+                    "seed {seed}: {a:?} {b:?}"
+                );
+            }
+        }
+    }
+    assert!(made >= 15, "only {made} of 20 seeds made the map");
+}
+
+#[test]
+fn ordering_by_distance_takes_the_farthest_first() {
+    use crate::filter::Metric;
+    // One bonfire, the farthest from the spawn of the boxes drawn.
+    let mut far = bonfires(json!({"count": 1, "tries": 50,
+        "order_by": [{"by": "distance", "where": [{"type": "kind_is", "kind": "spawn"}], "desc": true}]}));
+    far["config"]["where"] = json!([]);
+    let mut near = far.clone();
+    near["config"]["order_by"][0]["desc"] = json!(false);
+    let gap = |step: Json| {
+        let g = run(&pipeline(json!([spawn(), step])));
+        let all = objects(&g, "solta");
+        let s = all.iter().find(|o| o.kind == "spawn").unwrap().bbox;
+        let f = all.iter().find(|o| o.kind == "fogueira").unwrap().bbox;
+        Metric::Chebyshev.between(f, s)
+    };
+    // The same 50 boxes either way (the draws do not depend on the order).
+    let (far, near) = (gap(far), gap(near));
+    assert!(far > 40 && near < 10, "far {far}, near {near}");
+}

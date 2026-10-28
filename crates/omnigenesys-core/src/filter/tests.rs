@@ -477,3 +477,72 @@ fn cells_needs_a_share_and_stays_out_of_conditions() {
     let e = c.compile(&g, &tiles()).unwrap_err();
     assert!(e.to_string().contains("TagObjects"), "{e}");
 }
+
+// distance
+
+#[test]
+fn distance_is_the_gap_between_the_boxes() {
+    let a = b(0, 0, 3, 3);
+    for m in [Metric::Chebyshev, Metric::Euclidean, Metric::Manhattan] {
+        // Side by side, and overlapping: nothing between them.
+        assert_eq!(m.between(a, b(3, 0, 2, 2)), 0, "{m:?}");
+        assert_eq!(m.between(a, b(1, 1, 5, 5)), 0, "{m:?}");
+        // Two cells between them in x only.
+        assert_eq!(
+            m.between(a, b(5, 1, 1, 1)),
+            if m == Metric::Euclidean { 4 } else { 2 }
+        );
+    }
+    // 4 cells between in x and 2 in y.
+    let c = b(7, 5, 2, 2);
+    assert_eq!(Metric::Chebyshev.between(a, c), 4);
+    assert_eq!(Metric::Euclidean.between(a, c), 16 + 4);
+    assert_eq!(Metric::Manhattan.between(a, c), 6);
+    // Either way round.
+    assert_eq!(Metric::Manhattan.between(c, a), 6);
+}
+
+#[test]
+fn distance_filters_by_the_nearest_that_passes_where() {
+    // Slots of 5 × 4: rooms at columns 0, 1 and 2 of row 0 (a and c are 5
+    // cells apart, b is next to both), and a kind of its own at (0, 2).
+    let (g, id) = world(&[
+        ((0, 0), json!({"k": "a"})),
+        ((1, 0), json!({"k": "b"})),
+        ((2, 0), json!({"k": "c"})),
+        ((0, 2), json!({"k": "far"})),
+    ]);
+    let pass = |f: serde_json::Value| passing(&g, id, f);
+    let near_b = json!({"type": "prop_is", "name": "k", "value": "b"});
+    // a and c touch b; b is not its own nearest.
+    assert_eq!(
+        pass(json!([{"type": "distance", "where": [near_b], "max": 0}])),
+        [0, 2]
+    );
+    // The nearest of all, from each: only far has no room within 1.
+    assert_eq!(pass(json!([{"type": "distance", "min": 1}])), [3]);
+    // a and b to far: 4 rows between (rows 4..=7) in y, and b is right
+    // next to it in x; c is 5 columns off too.
+    let far = json!({"type": "prop_is", "name": "k", "value": "far"});
+    assert_eq!(
+        pass(json!([{"type": "distance", "where": [far.clone()], "min": 4, "max": 4}])),
+        [0, 1]
+    );
+    // far itself has no other far: endless, so `min` holds.
+    assert_eq!(
+        pass(json!([{"type": "distance", "where": [far], "min": 5}])),
+        [2, 3]
+    );
+    // With no such object, `min` holds and `max` does not.
+    let none = json!({"type": "prop_is", "name": "k", "value": "nada"});
+    assert_eq!(
+        pass(json!([{"type": "distance", "where": [none.clone()], "min": 3}])),
+        [0, 1, 2, 3]
+    );
+    assert!(pass(json!([{"type": "distance", "where": [none], "max": 3}])).is_empty());
+    let e = compile(&filters(json!([{"type": "distance"}])), &g, id).unwrap_err();
+    assert!(
+        e.to_string().contains("distance needs at least one of"),
+        "{e}"
+    );
+}
