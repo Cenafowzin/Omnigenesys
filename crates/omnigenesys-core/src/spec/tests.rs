@@ -754,3 +754,63 @@ fn a_missing_layer_in_a_cells_filter_is_reported_once() {
     assert_eq!(errors.len(), 1, "{errors:#?}");
     assert_eq!(errors[0].step_id.as_deref(), Some("a"));
 }
+
+// The map's size in expressions
+
+#[test]
+fn expressions_read_the_maps_size() {
+    let text = with(|v| {
+        v["size"] = json!({"width": 80, "height": 60});
+        v["params"] = json!({
+            "folga": {"type": "integer", "expr": "floor(min(map_width, map_height) / 4)"}
+        });
+        v["steps"] = json!([
+            {"id": "base", "operator": "Fill", "config": {"layer": "terrain", "tile": "floor"}},
+            {"id": "borda", "operator": "Fill", "config": {"layer": "terrain", "tile": "wall"},
+             "conditions": [{"type": "edge_distance", "max": {"$expr": "folga - map_depth"}}]},
+            {"id": "faixa", "operator": "Fill", "config": {"layer": "terrain", "tile": "wall"},
+             "conditions": [{"type": "edge_distance", "min": {"$expr": "floor(map_width * map_height / 400)"}}]}
+        ]);
+    });
+    let spec = parse(&text).spec;
+    // 60 / 4 = 15; no depth in the file reads as 1.
+    assert_eq!(
+        spec.param_values(),
+        [("folga".to_string(), ParamValue::Integer(15))]
+    );
+    let conditions = serde_json::to_value(&spec.steps[1].conditions).unwrap();
+    assert_eq!(conditions[0]["max"], json!(14));
+    let conditions = serde_json::to_value(&spec.steps[2].conditions).unwrap();
+    assert_eq!(conditions[0]["min"], json!(12));
+    // The size is no param: nothing to warn about, nothing to override.
+    assert!(parse(&text).warnings.is_empty());
+    let e = PipelineSpec::parse_with(&text, &[("map_width".into(), "10".into())]).unwrap_err();
+    assert!(e[0].message.contains("map_width"), "{e:?}");
+}
+
+#[test]
+fn the_maps_size_is_no_name_for_a_param() {
+    let text = with(|v| v["params"] = json!({"map_height": 3}));
+    let (pointer, message) = one_error(&text);
+    assert_eq!(pointer, "/params/map_height");
+    assert!(message.contains("the map's size"), "{message}");
+}
+
+#[test]
+fn an_error_on_a_size_expression_names_no_param() {
+    // map_width is an integer: dividing gives a number, which a whole
+    // number field refuses; the note must not send to a param that does
+    // not exist.
+    let text = with(|v| {
+        v["steps"][0]["conditions"] =
+            json!([{"type": "edge_distance", "max": {"$expr": "map_width / 3"}}]);
+    });
+    let errors = PipelineSpec::parse(&text).unwrap_err();
+    let d = &errors[0];
+    assert!(
+        d.note
+            .as_ref()
+            .is_none_or(|n| !n.message.contains("param 'map_width'")),
+        "{d:?}"
+    );
+}

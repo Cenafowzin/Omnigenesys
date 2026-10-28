@@ -94,12 +94,49 @@ pub(super) struct Declarations {
     pub overrides: HashMap<String, ParamValue>,
     /// What each computed param gave, once [`compute`] ran.
     pub computed: HashMap<String, ParamValue>,
+    /// The map's size, for expressions: `map_width`, `map_height`,
+    /// `map_depth` (see [`MAP_NAMES`]). Empty when the file's `size` does
+    /// not read; that error is reported with the rest of the file.
+    pub map: HashMap<String, ParamValue>,
+}
+
+/// The names an expression reads the map's size by, in cells, whole
+/// numbers: distances and counts that follow a map growing level by level
+/// (`floor(map_width / 4)`), as Houdini's `bbox()` and Unreal PCG's Get
+/// Bounds (pesquisa 2026-10-27-espalhar-ancoras-e-variantes, §2). Not
+/// params: no file declares them, no game sets them.
+pub const MAP_NAMES: [&str; 3] = ["map_width", "map_height", "map_depth"];
+
+impl Declarations {
+    /// Reads the map's size from the file's `size`, as the spec will: a
+    /// missing depth is 1.
+    pub(super) fn read_map(&mut self, size: Option<&Value>) {
+        let side = |k: &str| size.and_then(|s| s.get(k)).and_then(Value::as_u64);
+        let (Some(w), Some(h)) = (side("width"), side("height")) else {
+            return;
+        };
+        let d = match size.and_then(|s| s.get("depth")) {
+            None => 1,
+            Some(v) => match v.as_u64() {
+                Some(d) => d,
+                None => return,
+            },
+        };
+        for (name, n) in MAP_NAMES.iter().zip([w, h, d]) {
+            if let Ok(n) = i64::try_from(n) {
+                self.map.insert(name.to_string(), ParamValue::Integer(n));
+            }
+        }
+    }
 }
 
 impl Declarations {
     /// The value a step gets for `name`: the override, the computed value
     /// or the default.
     pub fn value(&self, name: &str) -> Option<&ParamValue> {
+        if let Some(v) = self.map.get(name) {
+            return Some(v);
+        }
         self.overrides
             .get(name)
             .or_else(|| self.computed.get(name))
@@ -174,6 +211,17 @@ pub(super) fn declarations(params: Option<&Value>, errors: &mut Vec<Diagnostic>)
     };
     for (name, value) in raw {
         let at = param_pointer(&name);
+        if MAP_NAMES.contains(&name.as_str()) {
+            errors.push(Diagnostic::new(
+                &at,
+                format!(
+                    "param '{name}': '{name}' is the map's size, which expressions read \
+                     from `size`; pick another name"
+                ),
+            ));
+            out.broken.insert(name);
+            continue;
+        }
         if expr::RESERVED.contains(&name.as_str()) {
             errors.push(Diagnostic::new(
                 &at,
@@ -224,11 +272,12 @@ fn expr_diagnostic(name: &str, e: expr::ExprError) -> Diagnostic {
     d
 }
 
-/// The params an expression names, once each, in order.
+/// The params an expression names, once each, in order; not the map's
+/// size, which is no param.
 fn names_of(e: &Expr) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for (n, _) in e.names() {
-        if !out.iter().any(|o| o == n) {
+        if !MAP_NAMES.contains(&n) && !out.iter().any(|o| o == n) {
             out.push(n.to_string());
         }
     }
@@ -271,6 +320,7 @@ impl Declarations {
         self.params
             .iter()
             .map(|(n, p)| (n.as_str(), expr_type(p.kind())))
+            .chain(self.map.keys().map(|n| (n.as_str(), expr::Type::Integer)))
             .collect()
     }
 

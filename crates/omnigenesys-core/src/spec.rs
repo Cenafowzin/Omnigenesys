@@ -51,6 +51,8 @@ pub struct PipelineSpec {
     /// `None` when the file has none; whoever runs it picks one.
     pub seed: Option<u64>,
     pub salt: String,
+    /// The expressions read the size as the file has it (`map_width`…):
+    /// change the file, not this, to change what they computed.
     pub size: GridSize,
     /// How many times the map may be made before giving up: an attempt
     /// that fails a step (a `Check`, a step with nothing to pick) is thrown
@@ -312,6 +314,7 @@ impl PipelineSpec {
 
         let mut errors = Vec::new();
         let mut declared = params::declarations(root.get("params"), &mut errors);
+        declared.read_map(root.get("size"));
         params::apply_overrides(&mut declared, overrides, &mut errors);
         params::compute(&mut declared, &mut errors);
         origin.sites = params::substitute(&mut root, &declared, &mut errors);
