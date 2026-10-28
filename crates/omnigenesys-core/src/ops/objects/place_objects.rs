@@ -48,6 +48,10 @@ pub struct PlaceObjectsConfig {
     pub layer: String,
     /// What the new objects are: what an engine reads them as.
     pub kind: String,
+    /// How many; `"all"`: every empty slot that passes, or, without a
+    /// lattice, as many as fit — until none of the `tries` boxes passes
+    /// `where`, at most one per cell of the map (Bridson's sampling stops
+    /// the same way; pesquisa 2026-10-27-espalhar-ancoras-e-variantes, R6).
     #[serde(default = "one")]
     pub count: Count,
     /// Without a lattice: the size of each object's box, drawn for each
@@ -222,10 +226,10 @@ impl OperatorType for PlaceObjects {
                 ));
             }
             (None, Some(size)) => {
-                if c.count == Count::Word(CountWord::All) {
+                if c.count == Count::Word(CountWord::All) && c.at.is_some() {
                     return Err(invalid(
                         "count",
-                        "without a lattice there is no \"all\": give a number or a range".into(),
+                        "with `at` there is one place: \"all\" would put every object on it".into(),
                     ));
                 }
                 let (width, height) = (
@@ -384,7 +388,12 @@ impl Operator for PlaceObjects {
         if !self.chance.hit(rng.next_u32()) {
             return Ok(());
         }
-        let n = self.amount.draw(rng);
+        // "All" stops when no candidate passes; without a lattice, also at
+        // one object per cell, so a `where` that always passes ends.
+        let n = self
+            .amount
+            .draw(rng)
+            .min(map.size.len().try_into().unwrap_or(u32::MAX));
 
         let filters = prepare_all(&grid, &self.filters)?;
         let order = self.order.prepare(&grid)?;

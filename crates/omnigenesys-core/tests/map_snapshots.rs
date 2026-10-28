@@ -299,3 +299,74 @@ fn the_same_seed_gives_the_same_bytes() {
     assert_eq!(island_output(512), island_output(512));
     assert_ne!(island_output(512), island_output(513));
 }
+
+/// Lost Fields: terrain, tall grass and the objects on top, as the map a
+/// player walks (tests/pipelines/lost_fields.json).
+#[test]
+fn lost_fields() {
+    let text = include_str!("pipelines/lost_fields.json");
+    let spec = PipelineSpec::parse(text).unwrap().spec;
+    let Built {
+        grid,
+        tiles,
+        pipeline,
+    } = spec.build(&Registry::with_builtins()).unwrap();
+    let made = pipeline
+        .run_attempts(&grid, &spec.salt, spec.seed.unwrap(), spec.attempts)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let g = made.grid;
+    let w = spec.size.width as usize;
+    let layer = |name: &str| {
+        g.tiles(g.layer_id(name).unwrap())
+            .unwrap()
+            .as_slice()
+            .to_vec()
+    };
+    let (terrain, grass) = (layer("terreno"), layer("vegetacao"));
+    let mut rows: Vec<Vec<char>> = terrain
+        .chunks(w)
+        .zip(grass.chunks(w))
+        .map(|(t, v)| {
+            t.iter()
+                .zip(v)
+                .map(
+                    |(&t, &v)| match (tiles.name(t).unwrap(), tiles.name(v).unwrap()) {
+                        ("mato_enraizado", _) => '#',
+                        ("path", _) => '+',
+                        (_, "mato_alto") => '"',
+                        _ => '.',
+                    },
+                )
+                .collect()
+        })
+        .collect();
+    let glyph = |kind: &str| match kind {
+        "spawn" => 'S',
+        "porta_saida" => 'P',
+        "estrutura_arena" => 'A',
+        "estrutura_desafio" => 'D',
+        "estrutura_loja" => 'L',
+        "estrutura_item" => 'I',
+        "pira" => 'F',
+        "poste_luz" => 'o',
+        "ponta" => 'x',
+        _ => '?',
+    };
+    for name in ["coisas", "pontas"] {
+        for o in g.objects(g.layer_id(name).unwrap()).unwrap().iter() {
+            for c in o.bbox.iter() {
+                rows[c.y as usize][c.x as usize] = glyph(&o.kind);
+            }
+        }
+    }
+    let mut out = format!(
+        "attempt {}; legend: # mato_enraizado \" mato_alto + path . floor, S spawn P porta_saida \
+         A arena D desafio L loja I item F pira o poste_luz x ponta\n",
+        made.attempt
+    );
+    for r in rows {
+        out.extend(r);
+        out.push('\n');
+    }
+    insta::assert_snapshot!(out);
+}

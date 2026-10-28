@@ -656,10 +656,12 @@ fn size_and_tries_belong_to_layers_without_a_lattice() {
         "tries",
         "every empty slot is a candidate",
     );
+    // Without a lattice "all" is as many as fit, but not on one place.
     fails(
-        json!({"layer": "solta", "kind": "x", "size": size, "count": "all"}),
+        json!({"layer": "solta", "kind": "x", "size": size, "count": "all",
+               "at": {"x": {"frac": 0}, "y": {"frac": 0}}}),
         "count",
-        "there is no \"all\"",
+        "with `at` there is one place",
     );
     fails(
         json!({"layer": "solta", "kind": "x", "size": size, "tries": 0}),
@@ -974,4 +976,96 @@ fn ordering_by_distance_takes_the_farthest_first() {
     // The same 50 boxes either way (the draws do not depend on the order).
     let (far, near) = (gap(far), gap(near));
     assert!(far > 40 && near < 10, "far {far}, near {near}");
+}
+
+// count "all" without a lattice: as many as fit
+
+#[test]
+fn all_loose_places_until_nothing_fits() {
+    use crate::filter::Metric;
+    // 3 × 3 rooms at least 10 apart on the 135 × 72 map: it stops by
+    // itself, every pair apart, and a 10-cell gap leaves room for a few.
+    let step = json!({"id": "postes", "operator": "PlaceObjects", "config": {
+        "layer": "solta", "kind": "poste", "count": "all", "size": {"width": 3, "height": 3}, "tries": 300,
+        "where": [{"type": "distance", "where": [{"type": "kind_is", "kind": "poste"}], "min": 10}]}});
+    let g = run(&pipeline(json!([step])));
+    let posts: Vec<_> = objects(&g, "solta").iter().map(|o| o.bbox).collect();
+    assert!(posts.len() >= 15, "{}", posts.len());
+    for (i, a) in posts.iter().enumerate() {
+        for b in &posts[i + 1..] {
+            assert!(Metric::Chebyshev.between(*a, *b) >= 10);
+        }
+    }
+    // With no `where` it still ends: at most one per cell.
+    let every = json!({"id": "tudo", "operator": "PlaceObjects", "config": {
+        "layer": "solta", "kind": "x", "count": "all", "size": {"width": 1, "height": 1}, "tries": 1}});
+    assert_eq!(
+        objects(&run(&pipeline(json!([every]))), "solta").len(),
+        135 * 72
+    );
+}
+
+#[test]
+fn all_with_at_is_refused() {
+    let mut s = at(
+        "a",
+        json!({"width": 1, "height": 1}),
+        json!({"x": {"frac": 0}, "y": {"frac": 0}}),
+    );
+    s["config"]["count"] = json!("all");
+    let e = build(&pipeline(json!([s]))).err().unwrap()[0]
+        .message
+        .clone();
+    assert!(e.contains("one place"), "{e}");
+}
+
+// star: each object to the nearest hub
+
+#[test]
+fn a_star_joins_each_object_to_its_nearest_hub() {
+    let rooms = json!({"id": "salas", "operator": "PlaceObjects", "config": {
+        "layer": "solta", "kind": "sala", "count": 8, "size": {"width": 5, "height": 5},
+        "where": [{"type": "overlaps", "margin": 2, "max": 0}]}});
+    let star = |keep: f64| {
+        json!({"id": "ligar", "operator": "ConnectObjects", "config": {
+        "objects": "solta", "layer": "conexoes", "strategy": "star", "keep": keep,
+        "hub": [{"type": "kind_is", "kind": "spawn"}]}})
+    };
+    let ends = |keep: f64| {
+        let g = run(&pipeline(json!([spawn(), rooms.clone(), star(keep)])));
+        let all = objects(&g, "solta");
+        let spawn = all.iter().find(|o| o.kind == "spawn").unwrap().id;
+        let links = objects(&g, "conexoes");
+        for l in &links {
+            let (a, b) = (
+                l.prop("from").and_then(Value::as_object),
+                l.prop("to").and_then(Value::as_object),
+            );
+            assert!(a == Some(spawn) || b == Some(spawn), "{l:?}");
+        }
+        links.len()
+    };
+    assert_eq!(ends(1.0), 8);
+    let some = ends(0.5);
+    assert!((1..8).contains(&some), "{some}");
+}
+
+#[test]
+fn a_star_needs_its_hubs_and_only_a_star_takes_them() {
+    let bad = |config: Json| {
+        build(&pipeline(
+            json!([{"id": "a", "operator": "ConnectObjects", "config": config}]),
+        ))
+        .err()
+        .unwrap()[0]
+            .message
+            .clone()
+    };
+    let e = bad(json!({"objects": "solta", "layer": "conexoes", "strategy": "star"}));
+    assert!(e.contains("needs its hubs"), "{e}");
+    let e = bad(
+        json!({"objects": "solta", "layer": "conexoes", "strategy": "mst",
+                       "hub": [{"type": "kind_is", "kind": "x"}]}),
+    );
+    assert!(e.contains("only `star` takes a `hub`"), "{e}");
 }

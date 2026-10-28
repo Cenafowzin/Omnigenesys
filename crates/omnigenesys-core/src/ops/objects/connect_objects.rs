@@ -32,6 +32,10 @@ use super::grow_objects::parent;
 ///   Adonaac): everything connected, with no loop.
 /// - `nearest`: each object to its `k` nearest.
 /// - `chain`: each object to the one made before it (the tutorial's).
+/// - `star`: each object to the nearest of those that pass `hub` (the
+///   hubs among themselves not): paths out of a spawn to every place, each
+///   kept or not on its own with `keep`, where cutting a tree's edge would
+///   cut off all past it.
 ///
 /// Then each pair, in the strategy's order (`nearest` shortest first),
 /// is joined only if it is not joined in `layer` already, its ends are at
@@ -68,6 +72,9 @@ pub struct ConnectObjectsConfig {
     /// With `parent`: the prop that names the object each one grew from.
     #[serde(default = "parent")]
     pub parent: String,
+    /// With `star`: which objects are the hubs.
+    #[serde(default)]
+    pub hub: Vec<ObjectFilter>,
 }
 
 fn connection() -> String {
@@ -82,6 +89,7 @@ pub enum Strategy {
     Mst,
     Nearest,
     Chain,
+    Star,
 }
 
 const MAX_K: u32 = 16;
@@ -95,6 +103,8 @@ pub struct ConnectObjects {
     min_hops: Option<u32>,
     keep: Option<Chance>,
     filter: CompiledFilter,
+    /// With `star`.
+    hub: CompiledFilter,
     kind: String,
     parent: String,
 }
@@ -138,6 +148,18 @@ impl OperatorType for ConnectObjects {
                 "0 lets every pair through: leave it out, or give 2 or more".into(),
             ));
         }
+        match (c.strategy, c.hub.is_empty()) {
+            (Strategy::Star, true) => {
+                return Err(invalid(
+                    "hub",
+                    "a star needs its hubs: say which objects with `hub`".into(),
+                ));
+            }
+            (s, false) if s != Strategy::Star => {
+                return Err(invalid("hub", "only `star` takes a `hub`".into()));
+            }
+            _ => {}
+        }
         let keep = chance(c.keep, "keep")?;
         let objects = bcx.read_objects(&c.objects)?;
         Ok(ConnectObjects {
@@ -148,6 +170,7 @@ impl OperatorType for ConnectObjects {
             min_hops: c.min_hops,
             keep: (c.keep < 1.0).then_some(keep),
             filter: bcx.filter("where", &c.filter, objects.layer())?,
+            hub: bcx.filter("hub", &c.hub, objects.layer())?,
             kind: c.kind,
             parent: c.parent,
         })
@@ -192,7 +215,7 @@ impl ConnectObjects {
     ) -> Vec<(usize, usize)> {
         let d = |a: usize, b: usize| distance(objects[a].bbox, objects[b].bbox);
         match self.strategy {
-            Strategy::Neighbours | Strategy::Parent => scene_pairs,
+            Strategy::Neighbours | Strategy::Parent | Strategy::Star => scene_pairs,
             Strategy::Chain => part.windows(2).map(|w| (w[0], w[1])).collect(),
             Strategy::Mst => {
                 // Prim from the first, keeping for each object outside its
@@ -277,9 +300,12 @@ impl Operator for ConnectObjects {
         let rng = parts.rng;
         let map = grid.map();
         let filter = grid.prepare_filter(&self.filter)?;
+        let hub = grid.prepare_filter(&self.hub)?;
+        let mut layers = self.filter.layers();
+        layers.extend(self.hub.layers());
         let mut reads = vec![self.objects];
         reads.extend(
-            reads_besides(&self.filter.layers(), &[self.layer])
+            reads_besides(&layers, &[self.layer])
                 .into_iter()
                 .filter(|r| r.layer() != self.objects.layer()),
         );
@@ -294,6 +320,20 @@ impl Operator for ConnectObjects {
 
         let mut scene_pairs: Vec<(usize, usize)> = Vec::new();
         match self.strategy {
+            Strategy::Star => {
+                let hubs: Vec<usize> = part
+                    .iter()
+                    .copied()
+                    .filter(|&i| hub.test(&scene, id, Subject::Object(i)))
+                    .collect();
+                for &i in part.iter().filter(|i| hubs.binary_search(i).is_err()) {
+                    // The nearest hub; on a tie the first.
+                    let d = |h: usize| distance(objects[i].bbox, objects[h].bbox);
+                    if let Some(&h) = hubs.iter().min_by_key(|&&h| (d(h), h)) {
+                        scene_pairs.push((i.min(h), i.max(h)));
+                    }
+                }
+            }
             Strategy::Neighbours => {
                 for &i in &part {
                     for j in scene.neighbours(id, Subject::Object(i)) {

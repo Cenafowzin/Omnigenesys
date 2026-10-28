@@ -1,0 +1,162 @@
+{
+  "version": 2,
+  "description": "Lost Fields: um campo aberto de coisas esquecidas. Spawn no centro de baixo e portão no centro de cima; estruturas espalhadas, a arena na metade de cima; caminhos orgânicos do spawn às estruturas e ramos que levam a lugares que já não existem; três piras longe umas das outras; mato por ruído e postes ao lado dos caminhos. Distâncias e contagens seguem o tamanho do mapa.",
+  "seed": 512,
+  "size": {"width": 80, "height": 80},
+  "attempts": 20,
+  "layers": [
+    "terreno",
+    "vegetacao",
+    {"name": "coisas", "kind": "objects"},
+    {"name": "ligacoes", "kind": "objects"},
+    {"name": "pontas", "kind": "objects"},
+    {"name": "altura_no_mapa", "kind": "scalar"},
+    {"name": "trilha", "kind": "scalar"},
+    {"name": "trilha_ramos", "kind": "scalar"},
+    {"name": "mato", "kind": "scalar"},
+    {"name": "variante_mato", "kind": "scalar"}
+  ],
+  "tiles": ["floor", "mato_enraizado", "path", "mato_alto"],
+  "params": {
+    "borda": {"type": "integer", "default": 2, "min": 1, "max": 10, "description": "Espessura da borda de mato enraizado"},
+    "longe_do_spawn": {"type": "integer", "expr": "floor(min(map_width, map_height) * 9 / 40)", "description": "Arena, desafio e piras ficam pelo menos isso longe do spawn (18 num mapa de 80)"},
+    "entre_piras": {"type": "integer", "expr": "floor(min(map_width, map_height) / 5)", "description": "As piras ficam pelo menos isso longe umas das outras (16 num mapa de 80), para o jogador explorar"},
+    "ramos": {"type": "integer", "expr": "max(3, floor(map_width * map_height / 1000))", "description": "Ramos que saem dos caminhos e não levam a nada (6 num mapa de 80)"},
+    "chance_caminho": {"type": "number", "default": 0.6, "min": 0, "max": 1, "step": 0.05, "description": "Chance de cada estrutura ganhar um caminho do spawn: nem toda estrutura tem um"},
+    "curvas": {"type": "integer", "default": 400, "min": 0, "max": 3000, "description": "Quanto os caminhos contornam os morros do ruído: 0 é reto, mais é mais curva"},
+    "entre_postes": {"type": "integer", "default": 15, "min": 2, "max": 60, "description": "Distância mínima entre dois postes"},
+    "mato_limiar": {"type": "number", "default": 0.42, "min": 0, "max": 1, "step": 0.01, "description": "Onde o ruído do mato passa disso, há mato alto: mais baixo, mais mato"}
+  },
+  "steps": [
+    {"id": "chao", "operator": "Fill", "description": "Tudo é chão.",
+     "config": {"layer": "terreno", "tile": "floor"}},
+    {"id": "borda", "operator": "Fill", "description": "A borda do mapa é mato enraizado, por onde não se passa.",
+     "config": {"layer": "terreno", "tile": "mato_enraizado"},
+     "conditions": [{"type": "edge_distance", "max": {"$expr": "borda - 1"}}]},
+
+    {"id": "spawn", "operator": "PlaceObjects", "description": "O jogador começa no centro de baixo, a 3 da borda.",
+     "config": {"layer": "coisas", "kind": "spawn", "size": {"width": 1, "height": 1},
+       "at": {"x": {"frac": 0.5}, "y": {"frac": 1, "offset": -3}, "pivot": [0.5, 1]}}},
+    {"id": "portao", "operator": "PlaceObjects", "description": "O portão de saída, 4 × 4, no centro de cima.",
+     "config": {"layer": "coisas", "kind": "porta_saida", "size": {"width": 4, "height": 4},
+       "at": {"x": {"frac": 0.5}, "y": {"frac": 0}, "pivot": [0.5, 0]}}},
+
+    {"id": "altura_no_mapa", "operator": "LinearGradient", "description": "0 no alto do mapa, 1 embaixo: para dizer \"na metade de cima\".",
+     "config": {"layer": "altura_no_mapa", "angle": 90}},
+    {"id": "arena", "operator": "PlaceObjects", "description": "A arena, 9 × 9, toda na metade de cima, longe do spawn, fora da borda e com 5 de folga de tudo; das caixas sorteadas, a mais longe de tudo o que já está no mapa, para espalhar.",
+     "config": {"layer": "coisas", "kind": "estrutura_arena", "size": {"width": 9, "height": 9}, "tries": 20,
+       "order_by": [{"by": "distance", "desc": true}],
+       "where": [
+         {"type": "cells", "max": 0, "condition": {"type": "near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 2}},
+         {"type": "cells", "min": 1, "condition": {"type": "scalar_in_range", "layer": "altura_no_mapa", "max": 0.5}},
+         {"type": "distance", "where": [{"type": "kind_is", "kind": "spawn"}], "min": {"$param": "longe_do_spawn"}},
+         {"type": "overlaps", "margin": 5, "max": 0}]}},
+    {"id": "desafio", "operator": "PlaceObjects", "description": "O desafio, 7 × 7, longe do spawn, fora da borda e com 5 de folga de tudo; das caixas sorteadas, a mais longe de tudo o que já está no mapa, para espalhar.",
+     "config": {"layer": "coisas", "kind": "estrutura_desafio", "size": {"width": 7, "height": 7}, "tries": 20,
+       "order_by": [{"by": "distance", "desc": true}],
+       "where": [
+         {"type": "cells", "max": 0, "condition": {"type": "near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 2}},
+         {"type": "distance", "where": [{"type": "kind_is", "kind": "spawn"}], "min": {"$param": "longe_do_spawn"}},
+         {"type": "overlaps", "margin": 5, "max": 0}]}},
+    {"id": "loja", "operator": "PlaceObjects", "description": "A loja, 6 × 6, fora da borda e com 4 de folga de tudo; das caixas sorteadas, a mais longe de tudo o que já está no mapa, para espalhar.",
+     "config": {"layer": "coisas", "kind": "estrutura_loja", "size": {"width": 6, "height": 6}, "tries": 20,
+       "order_by": [{"by": "distance", "desc": true}],
+       "where": [
+         {"type": "cells", "max": 0, "condition": {"type": "near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 2}},
+         {"type": "overlaps", "margin": 4, "max": 0}]}},
+
+    {"id": "ao_portao", "operator": "ConnectObjects", "description": "Um caminho do spawn ao portão, sempre.",
+     "config": {"objects": "coisas", "layer": "ligacoes", "strategy": "star", "kind": "caminho",
+       "where": [{"type": "kind_is", "kind": ["spawn", "porta_saida"]}],
+       "hub": [{"type": "kind_is", "kind": "spawn"}]}},
+    {"id": "ligacoes", "operator": "ConnectObjects", "description": "Do spawn a cada estrutura, cada uma com a chance `chance_caminho`: nem toda estrutura tem caminho.",
+     "config": {"objects": "coisas", "layer": "ligacoes", "strategy": "star", "kind": "caminho",
+       "keep": {"$param": "chance_caminho"},
+       "where": [{"type": "kind_is", "kind": ["spawn", "estrutura_arena", "estrutura_desafio", "estrutura_loja"]}],
+       "hub": [{"type": "kind_is", "kind": "spawn"}]}},
+    {"id": "trilha", "operator": "Noise", "description": "Um ruído suave que vira custo: o caminho contorna os morros dele.",
+     "config": {"layer": "trilha", "wavelength": 14, "octaves": 2}},
+    {"id": "trilha_forma", "operator": "Curve", "description": "O ruído ao cubo: os morros ficam caros de verdade e os vales baratos, então o caminho faz curvas largas em vez de seguir quase reto (o termo mais que linear de Johansen, pesquisa 2026-10-27-caminhos-organicos).",
+     "config": {"from": "trilha", "layer": "trilha", "curve": {"kind": "power", "exponent": 3}}},
+    {"id": "caminhos", "operator": "CarvePaths", "description": "Os caminhos pela trilha mais barata: chão custa 10, mais `curvas` × o ruído (contorna os morros), mais 180 a até 7 de outro caminho (os caminhos se afastam); a borda e o que encosta nela bloqueiam, menos dentro das coisas (o portão encosta na borda). Não pinta dentro das coisas.",
+     "config": {"connections": "ligacoes", "objects": "coisas", "layer": "terreno", "tile": "path", "shape": "cheapest",
+       "costs": [
+         {"where": [{"type": "near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 2},
+                    {"type": "not", "condition": {"type": "in_object", "layer": "coisas"}}], "cost": "blocked"},
+         {"where": [], "cost": 10}],
+       "add": [
+         {"field": "trilha", "weight": {"$param": "curvas"}},
+         {"where": [{"type": "near_type", "layer": "terreno", "tile": "path", "distance": 7}], "cost": 180}]},
+     "conditions": [{"type": "not", "condition": {"type": "in_object", "layer": "coisas"}}]},
+
+    {"id": "item", "operator": "PlaceObjects", "description": "A sala do item, 4 × 4, depois dos caminhos: fora deles, da borda, e com 3 de folga de tudo; das caixas sorteadas, a mais longe de tudo o que já está no mapa, para espalhar.",
+     "config": {"layer": "coisas", "kind": "estrutura_item", "size": {"width": 4, "height": 4}, "tries": 20,
+       "order_by": [{"by": "distance", "desc": true}],
+       "where": [
+         {"type": "cells", "max": 0, "condition": {"type": "any", "conditions": [
+           {"type": "near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 2},
+           {"type": "tile_is", "layer": "terreno", "tile": "path"}]}},
+         {"type": "overlaps", "margin": 3, "max": 0}]}},
+
+    {"id": "pontas", "operator": "PlaceObjects", "description": "Pontos onde os ramos acabam: lugares que já não estão lá. Entre 6 e 20 de um caminho, fora da borda e das coisas, a 12 ou mais um do outro; das caixas sorteadas, a mais longe das outras pontas, para ocupar os vazios.",
+     "config": {"layer": "pontas", "kind": "ponta", "count": {"$param": "ramos"}, "size": {"width": 1, "height": 1}, "tries": 200,
+       "where": [
+         {"type": "cells", "min": 1, "condition": {"type": "all", "conditions": [
+           {"type": "not_near_type", "layer": "terreno", "tile": "path", "distance": 5},
+           {"type": "near_type", "layer": "terreno", "tile": "path", "distance": 20},
+           {"type": "not_near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 3},
+           {"type": "not", "condition": {"type": "in_object", "layer": "coisas"}}]}},
+         {"type": "distance", "where": [{"type": "kind_is", "kind": "ponta"}], "min": 12}],
+       "order_by": [{"by": "distance", "where": [{"type": "kind_is", "kind": "ponta"}], "desc": true}]}},
+    {"id": "trilha_ramos", "operator": "Noise", "description": "Um ruído mais fino para os ramos: curvas mais fechadas.",
+     "config": {"layer": "trilha_ramos", "wavelength": 10, "octaves": 2}},
+    {"id": "trilha_ramos_forma", "operator": "Curve", "description": "O ruído dos ramos ao cubo, como o dos caminhos.",
+     "config": {"from": "trilha_ramos", "layer": "trilha_ramos", "curve": {"kind": "power", "exponent": 3}}},
+    {"id": "ramos", "operator": "CarvePaths", "description": "De cada ponta, um ramo até o caminho mais barato de alcançar (refeito a cada ramo: um ramo pode acabar noutro). Os mesmos custos, mas a repulsão não vale no próprio caminho, que é o destino.",
+     "config": {"objects": "pontas", "where": [{"type": "kind_is", "kind": "ponta"}],
+       "to_cells": [{"type": "tile_is", "layer": "terreno", "tile": "path"}],
+       "layer": "terreno", "tile": "path", "shape": "cheapest",
+       "costs": [
+         {"where": [{"type": "near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 2},
+                    {"type": "not", "condition": {"type": "in_object", "layer": "coisas"}}], "cost": "blocked"},
+         {"where": [], "cost": 10}],
+       "add": [
+         {"field": "trilha_ramos", "weight": 300},
+         {"where": [{"type": "near_type", "layer": "terreno", "tile": "path", "distance": 7},
+                    {"type": "not", "condition": {"type": "tile_is", "layer": "terreno", "tile": "path"}}], "cost": 180}]},
+     "conditions": [{"type": "not", "condition": {"type": "in_object", "layer": "coisas"}}]},
+
+    {"id": "piras", "operator": "PlaceObjects", "description": "As 3 piras que abrem o portão, 4 × 2: longe umas das outras e do spawn, a 2 ou mais de um caminho, com 4 de folga de tudo.",
+     "config": {"layer": "coisas", "kind": "pira", "count": 3, "size": {"width": 4, "height": 2}, "tries": 200,
+       "where": [
+         {"type": "cells", "max": 0, "condition": {"type": "any", "conditions": [
+           {"type": "near_type", "layer": "terreno", "tile": "mato_enraizado", "distance": 2},
+           {"type": "near_type", "layer": "terreno", "tile": "path", "distance": 2}]}},
+         {"type": "distance", "where": [{"type": "kind_is", "kind": "pira"}], "min": {"$param": "entre_piras"}},
+         {"type": "distance", "where": [{"type": "kind_is", "kind": "spawn"}], "min": {"$param": "longe_do_spawn"}},
+         {"type": "overlaps", "margin": 4, "max": 0}]}},
+
+    {"id": "mato", "operator": "Noise", "description": "O ruído do mato.",
+     "config": {"layer": "mato", "wavelength": 5.5, "octaves": 2}},
+    {"id": "mato_alto", "operator": "Fill", "description": "Mato alto onde o ruído passa do limiar: no chão, fora do caminho e da beira dele, fora das coisas.",
+     "config": {"layer": "vegetacao", "tile": "mato_alto"},
+     "conditions": [
+       {"type": "scalar_in_range", "layer": "mato", "min": {"$param": "mato_limiar"}},
+       {"type": "tile_is", "layer": "terreno", "tile": "floor"},
+       {"type": "not_near_type", "layer": "terreno", "tile": "path", "distance": 1},
+       {"type": "not", "condition": {"type": "in_object", "layer": "coisas"}}]},
+    {"id": "variante_mato", "operator": "PickVariant", "description": "Qual dos prefabs de mato cada mato alto usa, fixo pela semente.",
+     "config": {"layer": "variante_mato", "weights": [1, 1, 1]},
+     "conditions": [{"type": "tile_is", "layer": "vegetacao", "tile": "mato_alto"}]},
+
+    {"id": "postes", "operator": "PlaceObjects", "description": "Postes de luz ao lado dos caminhos, quantos couberem a pelo menos `entre_postes` um do outro, sem mato e com 2 de folga das coisas.",
+     "config": {"layer": "coisas", "kind": "poste_luz", "count": "all", "size": {"width": 1, "height": 1}, "tries": 300,
+       "where": [
+         {"type": "cells", "min": 1, "condition": {"type": "all", "conditions": [
+           {"type": "tile_is", "layer": "terreno", "tile": "floor"},
+           {"type": "neighbours", "min": 1, "condition": {"type": "tile_is", "layer": "terreno", "tile": "path"}},
+           {"type": "not", "condition": {"type": "tile_is", "layer": "vegetacao", "tile": "mato_alto"}}]}},
+         {"type": "distance", "where": [{"type": "kind_is", "kind": "poste_luz"}], "min": {"$param": "entre_postes"}},
+         {"type": "overlaps", "margin": 2, "max": 0}]}}
+  ]
+}
