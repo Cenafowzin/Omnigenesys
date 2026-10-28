@@ -283,7 +283,9 @@ fn indices_are_the_places_of_the_true_cells() {
     // Across word boundaries, in 3D, with a non-zero origin.
     let b = Bounds::new(Coord::new(-2, 5, 1), GridSize::new(13, 7, 3));
     let mut w = MaskWriter::new(b);
-    let want: Vec<usize> = (0..b.size.len()).filter(|i| i % 7 == 0 || i % 11 == 3).collect();
+    let want: Vec<usize> = (0..b.size.len())
+        .filter(|i| i % 7 == 0 || i % 11 == 3)
+        .collect();
     for i in 0..b.size.len() {
         w.push(want.contains(&i));
     }

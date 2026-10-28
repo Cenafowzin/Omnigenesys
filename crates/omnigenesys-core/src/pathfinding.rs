@@ -56,8 +56,32 @@ pub fn cheapest_path(
         )
     };
     let goal_at = at(goal);
-    // Every cell costs at least 1: cells left to `to` never overestimate.
-    let h = |c: Coord| u64::from(c.x.abs_diff(goal_at.x)) + u64::from(c.y.abs_diff(goal_at.y));
+    // What is left to `to`, never more than it costs: `d` steps, the last
+    // into `to` at its own cost and the others at least the cheapest cell's
+    // (1 × the distance made A* open nearly every cell where most cost 2:
+    // 1.9 ms against 0.29 ms, pesquisa 2026-10-27-caminhos-organicos, Q4),
+    // and a bend when `to` is off both the row and the column. Each step
+    // lowers it by no more than the step costs, so the first walk to reach
+    // `to` is a cheapest one.
+    let cheapest = cost[..cells]
+        .iter()
+        .copied()
+        .filter(|&c| c != BLOCKED)
+        .min()
+        .unwrap_or(1);
+    let last = match cost[goal] {
+        BLOCKED => 1,
+        c => u64::from(c),
+    };
+    let h = |c: Coord| {
+        let (dx, dy) = (c.x.abs_diff(goal_at.x), c.y.abs_diff(goal_at.y));
+        let d = u64::from(dx) + u64::from(dy);
+        if d == 0 {
+            return 0;
+        }
+        let bend = if dx > 0 && dy > 0 { u64::from(turn) } else { 0 };
+        u64::from(cheapest) * (d - 1) + last + bend
+    };
     // With a turn cost, a state is a cell and the direction it was
     // entered in; without one, the direction does not matter.
     let dirs = if turn > 0 { STEPS.len() } else { 1 };
