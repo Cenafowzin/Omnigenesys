@@ -307,3 +307,98 @@ fn costs_and_turns_belong_to_cheapest_paths() {
     let e = &build(&p).err().unwrap()[0];
     assert!(e.message.contains("or \"blocked\""), "{}", e.message);
 }
+
+// add: terms summed on the first-match cost
+
+#[test]
+fn an_added_rule_is_the_same_as_its_sum_in_costs() {
+    let wall = json!({"type": "in_object", "layer": "salas", "part": "wall"});
+    for turn in [0, 4] {
+        let first = run(&pipeline(
+            1,
+            carve(json!({"shape": "cheapest", "turn": turn, "costs": [{"where": [wall], "cost": 10}]})),
+            json!([]),
+        ))
+        .unwrap();
+        let added = run(&pipeline(
+            1,
+            carve(json!({"shape": "cheapest", "turn": turn, "add": [{"where": [wall], "cost": 9}]})),
+            json!([]),
+        ))
+        .unwrap();
+        assert_eq!(first, added, "turn {turn}");
+    }
+}
+
+/// Rooms A and B in a row, the straight path between their middles along
+/// y 3; a hill of cost in a field halfway pushes the path off that row.
+#[test]
+fn a_field_term_makes_the_path_go_round_its_hills() {
+    let rows_with = |weight: f64| {
+        let mut p = pipeline(
+            0,
+            carve(json!({"shape": "cheapest", "add": [{"field": "morro", "weight": weight}]})),
+            json!([]),
+        );
+        p["layers"].as_array_mut().unwrap().push(json!({"name": "morro", "kind": "scalar"}));
+        // 1 at (8, 3)…(9, 3), falling to 0 three cells away; a Curve
+        // inverted so the hill is high in the middle.
+        let hill = [
+            json!({"id": "morro", "operator": "RadialGradient", "config": {
+                "layer": "morro", "x": 0.225, "y": 0.175, "radius_x": 0.15, "radius_y": 0.15}}),
+            json!({"id": "alto", "operator": "Curve", "config": {
+                "from": "morro", "layer": "morro", "curve": {"kind": "linear"}, "invert": true}}),
+        ];
+        let steps = p["steps"].as_array_mut().unwrap();
+        let at = steps.len() - 1;
+        for (k, s) in hill.into_iter().enumerate() {
+            steps.insert(at + k, s);
+        }
+        run(&p).unwrap()
+    };
+    let open = |rows: &[String], x: usize, y: usize| rows[y].as_bytes()[x] == b'#';
+    let flat = rows_with(0.0);
+    assert!((4..=13).all(|x| open(&flat, x, 3)), "\n{}", flat.join("\n"));
+    let hilly = rows_with(40.0);
+    assert!(!(4..=13).all(|x| open(&hilly, x, 3)), "\n{}", hilly.join("\n"));
+    assert!(open(&hilly, 4, 3) && open(&hilly, 13, 3));
+}
+
+#[test]
+fn added_terms_keep_costs_from_1_and_blocked_cells_blocked() {
+    // A field taking everything below 1, and the rooms' walls blocked but
+    // the middle cell of the facing ones: the path still goes through it.
+    let mut p = pipeline(
+        0,
+        carve(json!({"shape": "cheapest", "costs": [
+            {"where": [{"type": "in_object", "layer": "salas", "part": "wall"},
+                       {"type": "not", "condition": {"type": "edge_distance", "min": 3, "max": 3}}], "cost": "blocked"}],
+            "add": [{"field": "todo", "weight": -500}]})),
+        json!([]),
+    );
+    p["layers"].as_array_mut().unwrap().push(json!({"name": "todo", "kind": "scalar"}));
+    let steps = p["steps"].as_array_mut().unwrap();
+    let at = steps.len() - 1;
+    steps.insert(at, json!({"id": "todo", "operator": "LinearGradient", "config": {"layer": "todo", "start": 0, "end": 0.01}}));
+    let rows = run(&p).unwrap();
+    let open = |x: usize, y: usize| rows[y].as_bytes()[x] == b'#';
+    assert!(open(8, 3) && open(9, 3), "\n{}", rows.join("\n"));
+    assert!(!open(8, 2) && !open(9, 4));
+}
+
+#[test]
+fn add_is_checked_when_built() {
+    let bad = |extra: Json| {
+        let p = pipeline(0, carve(extra), json!([]));
+        build(&p).err().unwrap()[0].message.clone()
+    };
+    let wall = json!({"type": "in_object", "layer": "salas", "part": "wall"});
+    assert!(bad(json!({"add": [{"where": [wall], "cost": 3}]})).contains("only a `cheapest` path"));
+    assert!(bad(json!({"shape": "cheapest", "add": [{"where": [wall], "cost": 0}]})).contains("term 0: a cost of 0"));
+    let e = bad(json!({"shape": "cheapest", "add": [{"field": "nada", "weight": 2}]}));
+    assert!(e.contains("nada"), "{e}");
+    let e = bad(json!({"shape": "cheapest", "add": [{"field": "x", "weight": 20000}]}));
+    assert!(e.contains("not found") || e.contains("20000"), "{e}");
+    let e = bad(json!({"shape": "cheapest", "add": [{"wehre": [], "cost": 3}]}));
+    assert!(e.contains("\"field\": layer, \"weight\": w"), "{e}");
+}

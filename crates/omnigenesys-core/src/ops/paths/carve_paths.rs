@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::{
-    access::{ReadHandle, WriteHandle},
+    access::{Reach, ReadHandle, WriteHandle},
     bounds::Bounds,
     condition::{CompiledCondition, Condition},
     coords::Coord,
@@ -39,6 +39,14 @@ use crate::{
 ///   the path fits through no gap narrower than itself, and never paints
 ///   a blocked cell (the obstacles grown by the walker's size, as in
 ///   configuration space).
+/// - `add`, with `cheapest`: terms added to that cost, the way the road
+///   generators add theirs (Galin et al.'s sum of terms, a noise penalty
+///   as in the A* Pathfinding Project, the Dijkstra maps of Brogue;
+///   pesquisa 2026-10-27-caminhos-organicos, Q1). A rule adds its `cost`
+///   where its conditions hold — "near another path, but not on it, +18"
+///   keeps paths apart; a field adds `round(weight × value)` of a scalar
+///   layer — a `Noise` there makes paths wander. A blocked cell stays
+///   blocked, and the sum stays from 1 to 10000.
 ///
 /// A path crosses whatever is in the way, rooms too: a wall it goes
 /// through is where a door goes (`Fill` with `in_object {wall}` and the
@@ -65,10 +73,42 @@ pub struct CarvePathsConfig {
     /// `cheapest` only: what walking into a cell costs, by rules in order.
     #[serde(default)]
     pub costs: Vec<CostRule>,
+    /// `cheapest` only: added to the cost of `costs`, every term that
+    /// applies.
+    #[serde(default)]
+    pub add: Vec<AddTerm>,
     /// `cheapest` only: added at each bend (0 to 1000, default 0).
     #[serde(default)]
     #[schemars(range(max = 1000))]
     pub turn: Option<u32>,
+}
+
+/// One term of `add`: a rule, `cost` (1 to 10000) more where all of
+/// `where` holds; or a field, `round(weight × value)` of the scalar layer
+/// `field` at the cell (weight from −10000 to 10000).
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(
+    untagged,
+    expecting = "{\"where\": [conditions], \"cost\": n} or {\"field\": layer, \"weight\": w}"
+)]
+pub enum AddTerm {
+    Rule(AddRule),
+    Field(AddField),
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddRule {
+    #[serde(rename = "where")]
+    pub conditions: Vec<Condition>,
+    pub cost: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddField {
+    pub field: String,
+    pub weight: f64,
 }
 
 /// Cells where all of `where` holds cost `cost`; an empty `where` is every
@@ -119,6 +159,9 @@ pub struct CarvePaths {
     when: Option<CompiledCondition>,
     /// `None`: the rule holds on every cell.
     costs: Vec<(Option<CompiledCondition>, u32)>,
+    /// `add`'s rules (`None`: every cell) and its fields.
+    adds: Vec<(Option<CompiledCondition>, u32)>,
+    fields: Vec<(ReadHandle, f64)>,
     turn: u32,
 }
 
@@ -141,8 +184,16 @@ impl OperatorType for CarvePaths {
                 message: "the objects the connections join are in a layer of their own".into(),
             });
         }
-        if c.shape != Shape::Cheapest && (c.turn.is_some() || !c.costs.is_empty()) {
-            let field = if c.turn.is_some() { "turn" } else { "costs" };
+        if c.shape != Shape::Cheapest
+            && (c.turn.is_some() || !c.costs.is_empty() || !c.add.is_empty())
+        {
+            let field = if c.turn.is_some() {
+                "turn"
+            } else if c.costs.is_empty() {
+                "add"
+            } else {
+                "costs"
+            };
             return Err(BuildError::Invalid {
                 field: field.into(),
                 message: "only a `cheapest` path has costs and turns".into(),
@@ -172,6 +223,38 @@ impl OperatorType for CarvePaths {
             });
             costs.push((all.map(|a| bcx.condition(&a)).transpose()?, cost));
         }
+        let (mut adds, mut fields) = (Vec::new(), Vec::new());
+        for (i, term) in c.add.iter().enumerate() {
+            match term {
+                AddTerm::Rule(rule) => {
+                    if !(1..=10_000).contains(&rule.cost) {
+                        return Err(BuildError::Invalid {
+                            field: "add".into(),
+                            message: format!(
+                                "term {i}: a cost of {} is not between 1 and 10000",
+                                rule.cost
+                            ),
+                        });
+                    }
+                    let all = (!rule.conditions.is_empty()).then(|| Condition::All {
+                        conditions: rule.conditions.clone(),
+                    });
+                    adds.push((all.map(|a| bcx.condition(&a)).transpose()?, rule.cost));
+                }
+                AddTerm::Field(f) => {
+                    if !(f.weight.is_finite() && f.weight.abs() <= 10_000.0) {
+                        return Err(BuildError::Invalid {
+                            field: "add".into(),
+                            message: format!(
+                                "term {i}: a weight of {} is not between -10000 and 10000",
+                                f.weight
+                            ),
+                        });
+                    }
+                    fields.push((bcx.read_scalar(&f.field, Reach::ZERO)?, f.weight));
+                }
+            }
+        }
         let connections = bcx.read_objects(&c.connections)?;
         // Declares the layers it looks into, too.
         let filter = bcx.filter("where", &c.filter, connections.layer())?;
@@ -185,6 +268,8 @@ impl OperatorType for CarvePaths {
             filter,
             when: bcx.step_conditions(),
             costs,
+            adds,
+            fields,
             turn: c.turn.unwrap_or(0),
         })
     }
@@ -266,6 +351,30 @@ impl CarvePaths {
             }
         }
         cost.iter_mut().filter(|c| **c == 0).for_each(|c| *c = 1);
+        if !self.adds.is_empty() || !self.fields.is_empty() {
+            // Summed wide, then brought back into 1..=10000; a blocked
+            // base stays blocked.
+            let mut sum: Vec<i64> = cost.iter().map(|&c| i64::from(c)).collect();
+            for (rule, c) in &self.adds {
+                match grid.mask(rule.as_ref())? {
+                    Some(holds) => holds.indices().for_each(|k| sum[k] += i64::from(*c)),
+                    None => sum.iter_mut().for_each(|s| *s += i64::from(*c)),
+                }
+            }
+            for (h, w) in &self.fields {
+                let values = grid.scalars(*h)?.as_slice();
+                for (s, v) in sum.iter_mut().zip(values) {
+                    // NaN adds nothing.
+                    let v = if v.is_nan() { 0.0 } else { f64::from(*v) };
+                    *s += (w * v).round() as i64;
+                }
+            }
+            for (c, s) in cost.iter_mut().zip(sum) {
+                if *c != BLOCKED {
+                    *c = s.clamp(1, 10_000) as u32;
+                }
+            }
+        }
         Ok(self.widen(cost, region))
     }
 
