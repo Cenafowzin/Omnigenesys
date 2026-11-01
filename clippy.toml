@@ -1,0 +1,25 @@
+# The same map on every target: these come from the platform's math library
+# and can differ in the last bit between Windows, Android, Apple and the web.
+# Use the `libm` crate (pure Rust) instead. Tests may use them as oracles.
+disallowed-methods = [
+  { path = "f64::powf", reason = "use libm::pow: the platform's differs between targets" },
+  { path = "f64::powi", reason = "use libm::pow: the platform's differs between targets" },
+  { path = "f64::hypot", reason = "use libm::hypot" },
+  { path = "f64::sin", reason = "use libm::sin" },
+  { path = "f64::cos", reason = "use libm::cos" },
+  { path = "f64::tan", reason = "use libm::tan" },
+  { path = "f64::sin_cos", reason = "use libm::sin and libm::cos" },
+  { path = "f64::exp", reason = "use libm::exp" },
+  { path = "f64::ln", reason = "use libm::log" },
+  { path = "f64::log2", reason = "use libm::log2" },
+  { path = "f64::log10", reason = "use libm::log10" },
+  { path = "f64::atan2", reason = "use libm::atan2" },
+  { path = "f64::cbrt", reason = "use libm::cbrt" },
+  { path = "f32::powf", reason = "use libm::powf" },
+  { path = "f32::powi", reason = "use libm::powf" },
+  { path = "f32::hypot", reason = "use libm::hypotf" },
+  { path = "f32::sin", reason = "use libm::sinf" },
+  { path = "f32::cos", reason = "use libm::cosf" },
+  { path = "f32::exp", reason = "use libm::expf" },
+  { path = "f32::ln", reason = "use libm::logf" },
+]

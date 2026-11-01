@@ -97,6 +97,7 @@ impl Grid {
             }
             LayerKind::Scalar => AnyLayer::Scalar(Layer::new(self.bounds, 0.0).map_err(too_large)?),
             LayerKind::Objects => AnyLayer::Objects(ObjectLayer::new(self.bounds)),
+            LayerKind::Index => AnyLayer::Index(Layer::new(self.bounds, 0).map_err(too_large)?),
         };
         let (index, _) = self.layers.insert_full(name, layer);
         Ok(LayerId(index))
@@ -161,6 +162,21 @@ impl Grid {
         layer
             .as_scalar_mut()
             .ok_or_else(|| wrong(name, LayerKind::Scalar, found))
+    }
+
+    pub fn indices(&self, id: LayerId) -> Result<&Layer<u32>, GridError> {
+        let (name, layer) = self.entry(id)?;
+        layer
+            .as_index()
+            .ok_or_else(|| wrong(name, LayerKind::Index, layer.kind()))
+    }
+
+    pub fn indices_mut(&mut self, id: LayerId) -> Result<&mut Layer<u32>, GridError> {
+        let (name, layer) = self.entry_mut(id)?;
+        let found = layer.kind();
+        layer
+            .as_index_mut()
+            .ok_or_else(|| wrong(name, LayerKind::Index, found))
     }
 
     /// A scalar layer to read and a tile layer to write, borrowed together.

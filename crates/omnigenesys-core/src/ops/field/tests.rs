@@ -1,5 +1,8 @@
 //! Noise, the gradients, Combine, Curve and the scalar_in_range and edge_distance
 //! conditions, through pipeline files as a user writes them.
+// The operators use `libm`; the oracles here use the platform's math on
+// purpose, as an independent check (clippy.toml forbids it elsewhere).
+#![allow(clippy::disallowed_methods)]
 
 use serde_json::{Value, json};
 
@@ -752,7 +755,7 @@ fn a_scalar_layer_is_exported_and_reads_back() {
     assert_eq!(layer["name"], "altura");
     assert_eq!(layer["kind"], "scalar");
     assert_eq!(layer["encoding"], "dense");
-    let back: Vec<f32> = layer["data"]
+    let back: Vec<f32> = layer["values"]
         .as_array()
         .unwrap()
         .iter()

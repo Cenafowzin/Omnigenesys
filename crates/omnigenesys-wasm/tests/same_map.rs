@@ -58,6 +58,8 @@ fn fingerprint(text: &str) -> u64 {
             None => {
                 if let Some(values) = map.scalar(&name) {
                     values.iter().for_each(|v| eat(&v.to_bits().to_le_bytes()));
+                } else if let Some(values) = map.index(&name) {
+                    values.iter().for_each(|v| eat(&v.to_le_bytes()));
                 }
             }
         }
@@ -68,55 +70,55 @@ fn fingerprint(text: &str) -> u64 {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn island() {
-    assert_eq!(fingerprint(ISLAND), 17_127_211_488_029_945_790);
+    assert_eq!(fingerprint(ISLAND), 16_467_742_384_463_902_516);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn cave() {
-    assert_eq!(fingerprint(CAVE), 13_610_475_303_326_337_056);
+    assert_eq!(fingerprint(CAVE), 17_425_259_260_481_602_690);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn cave_recipe() {
-    assert_eq!(fingerprint(CAVERNA), 7_856_562_658_279_331_004);
+    assert_eq!(fingerprint(CAVERNA), 12_851_837_730_035_771_666);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn lost_fields() {
-    assert_eq!(fingerprint(LOST_FIELDS), 17_026_649_735_697_712_561);
+    assert_eq!(fingerprint(LOST_FIELDS), 1_805_886_996_095_494_214);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn volume() {
-    assert_eq!(fingerprint(VOLUME), 16_705_279_568_056_867_519);
+    assert_eq!(fingerprint(VOLUME), 4_915_384_777_481_700_970);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn island_from_noise() {
-    assert_eq!(fingerprint(ISLAND_NOISE), 16_670_744_625_251_355_333);
+    assert_eq!(fingerprint(ISLAND_NOISE), 5_884_310_606_179_055_621);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn archipelago() {
-    assert_eq!(fingerprint(ARCHIPELAGO), 13_116_310_259_720_836_124);
+    assert_eq!(fingerprint(ARCHIPELAGO), 2_723_703_261_892_711_014);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn isaac_floor() {
-    assert_eq!(fingerprint(ISAAC), 827_253_375_940_226_750);
+    assert_eq!(fingerprint(ISAAC), 9_768_443_335_494_191_360);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn classic_dungeon() {
-    assert_eq!(fingerprint(DUNGEON), 15_538_782_398_295_496_442);
+    assert_eq!(fingerprint(DUNGEON), 542_386_212_072_927_256);
 }
 
 /// A deep floor (stage 6: 20 rooms, growth reseeded from the start) made
@@ -139,7 +141,7 @@ fn retried_attempts() {
 }
 
 const ATTEMPT: u32 = 5;
-const RETRIED: u64 = 15_758_665_605_549_804_499;
+const RETRIED: u64 = 14_681_728_831_627_922_317;
 
 /// Expressions over params: the same values to the last bit on both. JSON
 /// writes each f64 in its shortest exact form, so equal text is equal bits.

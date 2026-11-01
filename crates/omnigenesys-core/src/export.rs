@@ -11,7 +11,9 @@
 //! {
 //!   "format": "omnigenesys-map",
 //!   "version": 2,
-//!   "engine_version": "0.1.0",
+//!   "minor": 0,
+//!   "generator": {"name": "omnigenesys", "version": "0.1.0"},
+//!   "axes": {"x": "right", "y": "down", "z": "up"},
 //!   "seed": "512",
 //!   "salted": false,
 //!   "params": {"wall_chance": 0.1, "lake_margin": 2},
@@ -19,18 +21,43 @@
 //!   "size": [4, 2, 1],
 //!   "tiles": ["empty", "floor", "wall"],
 //!   "layers": [
-//!     {"name": "terrain", "kind": "tiles", "encoding": "rle", "data": [[1,6],[2,2]]},
-//!     {"name": "height", "kind": "scalar", "encoding": "dense", "data": [0.5, 0.25, 1, 0, 0.125, 0.75, 0.3, 0.6]}
+//!     {"name": "terrain", "kind": "tiles", "encoding": "rle", "runs": [1,6,2,2]},
+//!     {"name": "variant", "kind": "index", "encoding": "dense", "cells": [0,2,1,0,0,1,2,2]},
+//!     {"name": "height", "kind": "scalar", "encoding": "dense", "values": [0.5, 0.25, 1, 0, 0.125, 0.75, 0.3, 0.6]}
 //!   ],
-//!   "objects": [],
+//!   "objects": [{"id": 1, "type": "room", "layer": "rooms", "bbox": [0, 0, 0, 2, 2, 1], "props": {"hp": {"type": "int", "value": 3}}}],
 //!   "markers": []
 //! }
 //! ```
 //!
+//! The contract a reader can rely on (frozen with v2.0; pesquisa
+//! 2026-10-31-adaptador-unity and -adaptador-godot):
+//!
+//! - **Versions.** `version` is the major: a reader refuses one it does not
+//!   know. `minor` only adds: a reader takes a higher one, and **ignores
+//!   fields it does not know** — the opposite of the pipeline file, whose
+//!   `deny_unknown_fields` is right for what people write. A `kind` or an
+//!   `encoding` it does not know is data it cannot read: it refuses it.
+//! - **Axes.** `axes` says it: x grows to the right, y downwards (row 0 is
+//!   the top, as in an image, Tiled, LDtk and Godot 2D), z upwards (the
+//!   levels of a 3D map; 2D maps have depth 1). No unit: one cell is one
+//!   unit, and the engine's adapter sets the cell's size.
+//! - **Cells** go x fastest, then y, then z.
+//! - **Layers** come in the order the pipeline declared them, which is the
+//!   order they are drawn in: the first at the bottom.
+//! - **Tiles** are named: `tiles[i]` is the name of id `i` in this file
+//!   only, and `tiles[0]` is always `"empty"`; adapters map by name.
+//! - **Objects**: `bbox` is `[x, y, z, w, h, d]`, the box's first cell in
+//!   the axes above and its size in cells; `id`s are unique in the file.
+//!   Where on the box an engine object sits (its pivot) is the adapter's.
+//!   Each prop says its `type` (`int`, `float`, `bool`, `string`, `cell`,
+//!   `object`, `list`), so 2 stays an integer.
+//! - **Encodings**: `rle` is `runs`, a flat list of value and count;
+//!   `dense` is `cells` (tiles, index) or `values` (scalar).
+//!
 //! A scalar layer is always dense, each value the shortest decimal that
 //! reads back as the same f32; NaN and infinity are an error, not a value.
-//! Cells go x fastest, then y, then z. `tiles[0]` is always `"empty"`; the
-//! others follow in the order the pipeline declared them.
+//! The tiles after `"empty"` follow in the order the pipeline declared them.
 
 use std::io::{self, Write};
 
@@ -44,8 +71,12 @@ use crate::{
     tile::{TileId, TileRegistry},
 };
 
-/// Version of the output format (not of the pipeline format).
+/// Version of the output format (not of the pipeline format): the major,
+/// which a reader must know.
 pub const OUTPUT_VERSION: u32 = 2;
+/// What this version adds to the major: a reader of an older minor still
+/// reads it, ignoring what it does not know.
+pub const OUTPUT_MINOR: u32 = 0;
 
 /// The crate version, recorded so a map can be traced to what made it.
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -57,10 +88,10 @@ pub enum Encoding {
     /// goes to `dense`, the simpler one).
     #[default]
     Auto,
-    /// `[[tile, count], ...]`: tiny for layers with long runs (a floor),
-    /// up to three times the dense size for noisy ones.
+    /// `"runs": [tile, count, tile, count, ...]`: tiny for layers with long
+    /// runs (a floor), up to twice the dense size for noisy ones.
     Rle,
-    /// `[tile, tile, ...]`, one per cell, like LDtk's `intGridCsv`.
+    /// `"cells": [tile, tile, ...]`, one per cell, like LDtk's `intGridCsv`.
     Dense,
 }
 
@@ -140,8 +171,11 @@ pub fn write_json<W: Write>(
     let b = grid.bounds();
     w.raw("{\n  \"format\": \"omnigenesys-map\",\n  \"version\": ");
     w.int(OUTPUT_VERSION);
-    w.raw(",\n  \"engine_version\": ");
+    w.raw(",\n  \"minor\": ");
+    w.int(OUTPUT_MINOR);
+    w.raw(",\n  \"generator\": {\"name\": \"omnigenesys\", \"version\": ");
     w.string(ENGINE_VERSION);
+    w.raw("},\n  \"axes\": {\"x\": \"right\", \"y\": \"down\", \"z\": \"up\"}");
     // A string: above 2^53 a JSON number would be rounded by JavaScript.
     w.raw(",\n  \"seed\": \"");
     w.int(provenance.seed);
@@ -208,11 +242,52 @@ enum Choice {
     Smaller,
 }
 
+/// Whole-number cells, of a tile or an index layer.
+#[derive(Clone, Copy)]
+enum Ints<'g> {
+    Tiles(&'g [TileId]),
+    Index(&'g [u32]),
+}
+
+impl Ints<'_> {
+    fn kind(self) -> &'static str {
+        match self {
+            Ints::Tiles(_) => "tiles",
+            Ints::Index(_) => "index",
+        }
+    }
+
+    fn len(self) -> usize {
+        match self {
+            Ints::Tiles(c) => c.len(),
+            Ints::Index(c) => c.len(),
+        }
+    }
+
+    /// Calls `f` with each run: its value and its length.
+    fn runs(self, mut f: impl FnMut(u32, usize)) {
+        match self {
+            Ints::Tiles(c) => c
+                .chunk_by(|a, b| a == b)
+                .for_each(|r| f(u32::from(r[0].0), r.len())),
+            Ints::Index(c) => c.chunk_by(|a, b| a == b).for_each(|r| f(r[0], r.len())),
+        }
+    }
+
+    /// Calls `f` with each cell's value.
+    fn each(self, mut f: impl FnMut(u32)) {
+        match self {
+            Ints::Tiles(c) => c.iter().for_each(|t| f(u32::from(t.0))),
+            Ints::Index(c) => c.iter().for_each(|&v| f(v)),
+        }
+    }
+}
+
 /// A layer ready to write: its cells and how to encode them.
 enum Planned<'g> {
-    Tiles {
+    Ints {
         name: &'g str,
-        cells: &'g [TileId],
+        cells: Ints<'g>,
         choice: Choice,
     },
     /// Always dense: a float rarely repeats exactly, so runs do not pay.
@@ -242,23 +317,30 @@ fn plan<'g>(
             layers.push(Planned::Scalar { name, cells });
             continue;
         }
-        let cells = grid.tiles(id)?.as_slice();
-        let (runs, max) = scan(cells);
-        if let Some(max) = max
-            && max.0 as usize >= tiles.len()
-        {
-            return Err(ExportError::UnknownTile {
-                layer: name.to_string(),
-                id: max.0,
-                count: tiles.len(),
-            });
-        }
+        let (cells, runs, max) = if grid.kind(id)? == LayerKind::Index {
+            let cells = grid.indices(id)?.as_slice();
+            let (runs, max) = scan(cells);
+            (Ints::Index(cells), runs, max)
+        } else {
+            let cells = grid.tiles(id)?.as_slice();
+            let (runs, max) = scan(cells);
+            if let Some(max) = max
+                && max.0 as usize >= tiles.len()
+            {
+                return Err(ExportError::UnknownTile {
+                    layer: name.to_string(),
+                    id: max.0,
+                    count: tiles.len(),
+                });
+            }
+            (Ints::Tiles(cells), runs, max.map(|m| u32::from(m.0)))
+        };
         let choice = match encoding {
             Encoding::Auto if rle_may_win(cells.len(), runs, max) => Choice::Smaller,
             Encoding::Auto | Encoding::Dense => Choice::Dense,
             Encoding::Rle => Choice::Rle,
         };
-        layers.push(Planned::Tiles {
+        layers.push(Planned::Ints {
             name,
             cells,
             choice,
@@ -269,7 +351,7 @@ fn plan<'g>(
 
 /// Number of runs and the largest id, comparing neighbours: a loop the
 /// compiler vectorizes.
-fn scan(cells: &[TileId]) -> (usize, Option<TileId>) {
+fn scan<T: Copy + Ord>(cells: &[T]) -> (usize, Option<T>) {
     let Some(&first) = cells.first() else {
         return (0, None);
     };
@@ -282,12 +364,12 @@ fn scan(cells: &[TileId]) -> (usize, Option<TileId>) {
 }
 
 /// Whether rle could take fewer bytes than dense. A run costs rle at
-/// least 6 bytes (`[1,1],`) and a cell costs dense at most
+/// least 4 bytes (`1,1,`) and a cell costs dense at most
 /// `digits(max) + 1`, so a noisy layer is settled here, from the scan.
 /// Counting it run by run would cost 9× the scan (measured 2026-10-22,
 /// 1024², 40 interleaved runs).
-fn rle_may_win(cells: usize, runs: usize, max: Option<TileId>) -> bool {
-    max.is_some_and(|max| 6 * runs < (digits(max.0 as usize) + 1) * cells)
+fn rle_may_win(cells: usize, runs: usize, max: Option<u32>) -> bool {
+    max.is_some_and(|max| 4 * runs < (digits(max as usize) + 1) * cells)
 }
 
 /// Decimal digits of `n`.
@@ -464,7 +546,7 @@ impl<W: Write> Writer<W> {
 
     fn layer(&mut self, layer: &Planned<'_>) -> io::Result<()> {
         let (name, cells, choice) = match *layer {
-            Planned::Tiles {
+            Planned::Ints {
                 name,
                 cells,
                 choice,
@@ -481,9 +563,14 @@ impl<W: Write> Writer<W> {
         };
         self.raw("{\"name\": ");
         self.string(name);
-        self.raw(", \"kind\": \"tiles\", \"encoding\": ");
-        self.raw(if rle { "\"rle\"" } else { "\"dense\"" });
-        self.raw(", \"data\": [");
+        self.raw(", \"kind\": \"");
+        self.raw(cells.kind());
+        self.raw("\", \"encoding\": ");
+        self.raw(if rle {
+            "\"rle\", \"runs\": ["
+        } else {
+            "\"dense\", \"cells\": ["
+        });
         if rle {
             self.emit_scratch()?;
         } else {
@@ -499,7 +586,7 @@ impl<W: Write> Writer<W> {
         use std::fmt::Write as _;
         self.raw("{\"name\": ");
         self.string(name);
-        self.raw(", \"kind\": \"scalar\", \"encoding\": \"dense\", \"data\": [");
+        self.raw(", \"kind\": \"scalar\", \"encoding\": \"dense\", \"values\": [");
         let mut text = String::new();
         for (i, v) in cells.iter().enumerate() {
             text.clear();
@@ -521,21 +608,21 @@ impl<W: Write> Writer<W> {
     /// Encodes `cells` as rle into `scratch` and returns the exact size the
     /// same cells take dense: one pass over the runs for both, so when rle
     /// wins (the usual case here) the cells are not walked again.
-    fn encode_rle(&mut self, cells: &[TileId]) -> usize {
+    fn encode_rle(&mut self, cells: Ints<'_>) -> usize {
         self.scratch.clear();
         let mut dense = 0;
-        for (i, run) in cells.chunk_by(|a, b| a == b).enumerate() {
-            self.scratch
-                .extend_from_slice(if i == 0 { b"[" } else { b",[" });
-            let id = self.num.format(run[0].0);
+        let (scratch, num) = (&mut self.scratch, &mut self.num);
+        cells.runs(|value, n| {
+            if !scratch.is_empty() {
+                scratch.push(b',');
+            }
+            let id = num.format(value);
             // `id,` per cell.
-            dense += run.len() * (id.len() + 1);
-            self.scratch.extend_from_slice(id.as_bytes());
-            self.scratch.push(b',');
-            self.scratch
-                .extend_from_slice(self.num.format(run.len()).as_bytes());
-            self.scratch.push(b']');
-        }
+            dense += n * (id.len() + 1);
+            scratch.extend_from_slice(id.as_bytes());
+            scratch.push(b',');
+            scratch.extend_from_slice(num.format(n).as_bytes());
+        });
         // No separator after the last cell.
         dense.saturating_sub(1)
     }
@@ -551,15 +638,21 @@ impl<W: Write> Writer<W> {
         }
     }
 
-    fn dense(&mut self, cells: &[TileId]) -> io::Result<()> {
-        for (i, t) in cells.iter().enumerate() {
-            if i > 0 {
+    fn dense(&mut self, cells: Ints<'_>) -> io::Result<()> {
+        let mut first = true;
+        let mut result = Ok(());
+        cells.each(|v| {
+            if result.is_err() {
+                return;
+            }
+            if !first {
                 self.raw(",");
             }
-            self.int(t.0);
-            self.spill()?;
-        }
-        Ok(())
+            first = false;
+            self.int(v);
+            result = self.spill();
+        });
+        result
     }
 }
 

@@ -46,11 +46,17 @@ fn decode(text: &str) -> (Value, Vec<(String, Vec<u16>)>) {
         .unwrap()
         .iter()
         .map(|l| {
-            let data = l["data"].as_array().unwrap();
             let cells = match l["encoding"].as_str().unwrap() {
-                "dense" => data.iter().map(|t| t.as_u64().unwrap() as u16).collect(),
-                "rle" => data
+                "dense" => l["cells"]
+                    .as_array()
+                    .unwrap()
                     .iter()
+                    .map(|t| t.as_u64().unwrap() as u16)
+                    .collect(),
+                "rle" => l["runs"]
+                    .as_array()
+                    .unwrap()
+                    .chunks(2)
                     .flat_map(|run| {
                         let n = run[1].as_u64().unwrap() as usize;
                         std::iter::repeat_n(run[0].as_u64().unwrap() as u16, n)
@@ -70,7 +76,9 @@ fn writes_the_documented_format_byte_for_byte() {
         r#"{{
   "format": "omnigenesys-map",
   "version": 2,
-  "engine_version": "{ENGINE_VERSION}",
+  "minor": 0,
+  "generator": {{"name": "omnigenesys", "version": "{ENGINE_VERSION}"}},
+  "axes": {{"x": "right", "y": "down", "z": "up"}},
   "seed": "512",
   "salted": false,
   "params": {{}},
@@ -78,7 +86,7 @@ fn writes_the_documented_format_byte_for_byte() {
   "size": [4, 2, 1],
   "tiles": ["empty", "floor", "wall"],
   "layers": [
-    {{"name": "terrain", "kind": "tiles", "encoding": "rle", "data": [[1,6],[2,2]]}}
+    {{"name": "terrain", "kind": "tiles", "encoding": "rle", "runs": [1,6,2,2]}}
   ],
   "objects": [],
   "markers": []
@@ -92,7 +100,7 @@ fn writes_the_documented_format_byte_for_byte() {
 fn dense_writes_one_id_per_cell() {
     let text = write(&small(), SEED, Encoding::Dense);
     assert!(
-        text.contains(r#""encoding": "dense", "data": [1,1,1,1,1,1,2,2]}"#),
+        text.contains(r#""encoding": "dense", "cells": [1,1,1,1,1,1,2,2]}"#),
         "{text}"
     );
 }
@@ -128,11 +136,11 @@ fn auto_picks_dense_for_noisy_layers() {
         .set(Coord::ZERO, TileId(1))
         .unwrap();
     let (v, _) = decode(&write(&g, SEED, Encoding::Auto));
-    // "1,2,1,2" against "[1,1],[2,1],[1,1],[2,1]".
+    // "1,2,1,2" against "1,1,2,1,1,1,2,1".
     assert_eq!(v["layers"][0]["encoding"], "dense");
-    // "1,0,0,0" (7 bytes) against "[1,1],[0,3]" (11).
+    // "1,0,0,0" (7 bytes) against "1,1,0,3" (7): a tie goes to dense.
     assert_eq!(v["layers"][1]["encoding"], "dense");
-    assert_eq!(v["layers"][1]["data"], json!([1, 0, 0, 0]));
+    assert_eq!(v["layers"][1]["cells"], json!([1, 0, 0, 0]));
 }
 
 #[test]
@@ -205,39 +213,39 @@ fn an_unregistered_tile_fails_before_writing_anything() {
 #[test]
 fn scan_counts_runs_and_the_largest_id() {
     let ids = |v: &[u16]| v.iter().map(|&t| TileId(t)).collect::<Vec<_>>();
-    assert_eq!(scan(&[]), (0, None));
+    assert_eq!(scan::<TileId>(&[]), (0, None));
     assert_eq!(scan(&ids(&[3])), (1, Some(TileId(3))));
     assert_eq!(scan(&ids(&[1, 1, 4, 4, 1])), (3, Some(TileId(4))));
 }
 
 #[test]
 fn noisy_layers_are_settled_without_counting() {
-    let t = |n| Some(TileId(n));
-    // 6 bytes a run at least, 2 bytes a cell at most: runs >= cells / 3.
-    assert!(!rle_may_win(9, 3, t(1)));
-    assert!(rle_may_win(9, 2, t(1)));
-    // Two-digit ids: 3 bytes a cell, so runs >= cells / 2.
-    assert!(rle_may_win(10, 4, t(12)));
-    assert!(!rle_may_win(10, 5, t(12)));
+    let t = |n| Some(n);
+    // 4 bytes a run at least, 2 bytes a cell at most: runs >= cells / 2.
+    assert!(!rle_may_win(9, 5, t(1)));
+    assert!(rle_may_win(9, 4, t(1)));
+    // Two-digit ids: 3 bytes a cell, so runs >= cells * 3 / 4.
+    assert!(rle_may_win(10, 7, t(12)));
+    assert!(!rle_may_win(10, 8, t(12)));
     assert!(!rle_may_win(0, 0, None));
 }
 
 #[test]
 fn a_tie_goes_to_dense() {
-    // "1,1,12,12,12" and "[1,2],[12,3]": 12 bytes each.
+    // "1,1,1,2" and "1,3,2,1": 7 bytes each.
     assert_eq!(
-        data_len(&[1, 1, 12, 12, 12], Encoding::Auto),
-        (12, "dense".to_string())
+        data_len(&[1, 1, 1, 2], Encoding::Auto),
+        (7, "dense".to_string())
     );
-    // One more 12: dense grows by 3 bytes, rle not at all.
+    // One more 1: dense grows by 2 bytes, rle not at all.
     assert_eq!(
-        data_len(&[1, 1, 12, 12, 12, 12], Encoding::Auto),
-        (12, "rle".to_string())
+        data_len(&[1, 1, 1, 1, 2], Encoding::Auto),
+        (7, "rle".to_string())
     );
 }
 
-/// Length of the `data` array as written, and the encoding used, for one
-/// layer of `pattern`.
+/// Length of the `runs` or `cells` array as written, and the encoding
+/// used, for one layer of `pattern`.
 fn data_len(pattern: &[u16], encoding: Encoding) -> (usize, String) {
     let size = GridSize::new(pattern.len() as u32, 1, 1);
     let mut g = Grid::new(Bounds::new(Coord::ZERO, size));
@@ -250,13 +258,18 @@ fn data_len(pattern: &[u16], encoding: Encoding) -> (usize, String) {
     let many = TileRegistry::new((1..=12).map(|i| format!("t{i}"))).unwrap();
     write_json(&mut out, &g, &many, &SEED, encoding).unwrap();
     let text = String::from_utf8(out).unwrap();
-    let start = text.find("\"data\": [").unwrap() + "\"data\": [".len();
-    let end = text[start..].find("]}").unwrap() + start;
     let chosen = if text.contains("\"encoding\": \"rle\"") {
         "rle"
     } else {
         "dense"
     };
+    let key = if chosen == "rle" {
+        "\"runs\": ["
+    } else {
+        "\"cells\": ["
+    };
+    let start = text.find(key).unwrap() + key.len();
+    let end = text[start..].find("]}").unwrap() + start;
     (end - start, chosen.to_string())
 }
 
@@ -350,4 +363,38 @@ fn a_non_finite_param_fails_before_writing() {
     let e = write_json(&mut out, &small(), &tiles(), &p, Encoding::Auto).unwrap_err();
     assert_eq!(e.to_string(), "param 'x' is NaN, which JSON cannot hold");
     assert!(out.is_empty());
+}
+
+#[test]
+fn an_index_layer_is_written_as_whole_numbers() {
+    let mut g = small();
+    let v = g.add_layer("variant", LayerKind::Index).unwrap();
+    let layer = g.indices_mut(v).unwrap();
+    for (x, n) in [7u32, 7, 7, 7, 300_000, 0, 0, 0].into_iter().enumerate() {
+        let c = Coord::new(x as i32 % 4, x as i32 / 4, 0);
+        layer.set(c, n).unwrap();
+    }
+    let text = write(&g, SEED, Encoding::Auto);
+    let out: Value = serde_json::from_str(&text).unwrap();
+    let l = &out["layers"][1];
+    assert_eq!(l["kind"], "index");
+    assert_eq!(l["encoding"], "rle");
+    assert_eq!(l["runs"], json!([7, 4, 300_000, 1, 0, 3]));
+    let dense = write(&g, SEED, Encoding::Dense);
+    assert!(
+        dense.contains(r#""kind": "index", "encoding": "dense", "cells": [7,7,7,7,300000,0,0,0]}"#),
+        "{dense}"
+    );
+}
+
+#[test]
+fn a_scalar_layer_writes_values() {
+    let mut g = small();
+    let h = g.add_layer("height", LayerKind::Scalar).unwrap();
+    g.scalars_mut(h).unwrap().set(Coord::ZERO, 0.5).unwrap();
+    let text = write(&g, SEED, Encoding::Auto);
+    assert!(
+        text.contains(r#""kind": "scalar", "encoding": "dense", "values": [0.5,0,0,0,0,0,0,0]}"#),
+        "{text}"
+    );
 }

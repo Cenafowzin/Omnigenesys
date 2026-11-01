@@ -20,6 +20,11 @@ pub enum AnyLayer {
     /// Things with a place but no value per cell: rooms, connections
     /// (PLANNING §2.12).
     Objects(ObjectLayer),
+    /// A whole number per cell: which variant of a bush a cell shows,
+    /// a region's id. Not a tile (no name to it) and not a measure (no
+    /// fraction): written as runs, as tiles are (pesquisa
+    /// 2026-10-31-adaptador-unity, formato item 7).
+    Index(Layer<u32>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
@@ -28,6 +33,7 @@ pub enum LayerKind {
     Tiles,
     Scalar,
     Objects,
+    Index,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -127,6 +133,7 @@ impl AnyLayer {
             AnyLayer::Tiles(_) => LayerKind::Tiles,
             AnyLayer::Scalar(_) => LayerKind::Scalar,
             AnyLayer::Objects(_) => LayerKind::Objects,
+            AnyLayer::Index(_) => LayerKind::Index,
         }
     }
 
@@ -136,6 +143,7 @@ impl AnyLayer {
             AnyLayer::Tiles(layer) => layer.bounds(),
             AnyLayer::Scalar(layer) => layer.bounds(),
             AnyLayer::Objects(layer) => layer.bounds(),
+            AnyLayer::Index(layer) => layer.bounds(),
         }
     }
 
@@ -171,6 +179,22 @@ impl AnyLayer {
         }
     }
 
+    #[inline]
+    pub fn as_index(&self) -> Option<&Layer<u32>> {
+        match self {
+            AnyLayer::Index(layer) => Some(layer),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn as_index_mut(&mut self) -> Option<&mut Layer<u32>> {
+        match self {
+            AnyLayer::Index(layer) => Some(layer),
+            _ => None,
+        }
+    }
+
     pub fn as_objects(&self) -> Option<&ObjectLayer> {
         match self {
             AnyLayer::Objects(layer) => Some(layer),
@@ -192,6 +216,7 @@ impl std::fmt::Display for LayerKind {
             LayerKind::Tiles => write!(f, "tiles"),
             LayerKind::Scalar => write!(f, "scalar"),
             LayerKind::Objects => write!(f, "objects"),
+            LayerKind::Index => write!(f, "index"),
         }
     }
 }

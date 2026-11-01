@@ -26,6 +26,11 @@ itoa = "1"
 chacha20 = { version = "0.10.2", default-features = false, features = ["rng"] }
 rand_core = "0.10"
 sha2 = { version = "0.11", default-features = false }
+# Math the same on every target: pow, hypot, sin and cos from the platform's
+# library can differ in the last bit between Windows, Android, Apple and the
+# web, and a last bit can move a cell across a band (pesquisa
+# 2026-10-31-adaptador-unity, risco 1). A pure-Rust port of musl's libm.
+libm = "0.2"
 
 [dev-dependencies]
 # Golden map snapshots in tests/snapshots.rs; review changes with `cargo insta review`.

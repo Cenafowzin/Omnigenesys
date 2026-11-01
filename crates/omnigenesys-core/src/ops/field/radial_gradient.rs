@@ -1,3 +1,4 @@
+use crate::math::{Power, length};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -84,13 +85,13 @@ pub struct RadialGradient {
 }
 
 /// The norm `shape` picks, with the exact cases apart: they are common,
-/// and cheaper than two `powf`.
+/// and cheaper than three powers. `P` keeps `p` and `1/p`.
 #[derive(Debug, Clone, Copy)]
 enum Norm {
     Diamond,
     Circle,
     Square,
-    P(f64),
+    P(Power, Power),
 }
 
 impl Norm {
@@ -99,7 +100,10 @@ impl Norm {
             0.0 => Norm::Diamond,
             0.5 => Norm::Circle,
             1.0 => Norm::Square,
-            s => Norm::P(1.0 / (1.0 - s)),
+            s => {
+                let p = 1.0 / (1.0 - s);
+                Norm::P(Power::new(p), Power::new(1.0 / p))
+            }
         }
     }
 
@@ -111,14 +115,14 @@ impl Norm {
         let (u, v) = (u.abs(), v.abs());
         match self {
             Norm::Diamond => u + v,
-            Norm::Circle => u.hypot(v),
+            Norm::Circle => length(u, v),
             Norm::Square => u.max(v),
-            Norm::P(p) => {
+            Norm::P(p, inv) => {
                 let m = u.max(v);
                 if m == 0.0 {
                     return 0.0;
                 }
-                m * ((u / m).powf(p) + (v / m).powf(p)).powf(1.0 / p)
+                m * inv.of(p.of(u / m) + p.of(v / m))
             }
         }
     }
@@ -154,7 +158,8 @@ impl OperatorType for RadialGradient {
                 format!("{} is not between 0 and 1", c.shape),
             ));
         }
-        let (sin, cos) = c.rotation.to_radians().sin_cos();
+        let turn = c.rotation.to_radians();
+        let (sin, cos) = (libm::sin(turn), libm::cos(turn));
         Ok(RadialGradient {
             layer: bcx.write_scalar(&c.layer)?,
             centre: (c.x, c.y),

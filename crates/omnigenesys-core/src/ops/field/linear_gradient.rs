@@ -78,7 +78,8 @@ impl OperatorType for LinearGradient {
                 format!("{} is not above start {}", c.end, c.start),
             ));
         }
-        let (sin, cos) = c.angle.to_radians().sin_cos();
+        let turn = c.angle.to_radians();
+        let (sin, cos) = (libm::sin(turn), libm::cos(turn));
         Ok(LinearGradient {
             layer: bcx.write_scalar(&c.layer)?,
             cos,

@@ -13,6 +13,7 @@ pub mod filter;
 pub mod grid;
 pub mod layer;
 pub mod mask;
+mod math;
 pub mod noise;
 pub mod object;
 pub mod operator;

@@ -14,7 +14,7 @@
     {"name": "trilha", "kind": "scalar"},
     {"name": "trilha_ramos", "kind": "scalar"},
     {"name": "mato", "kind": "scalar"},
-    {"name": "variante_mato", "kind": "scalar"}
+    {"name": "variante_mato", "kind": "index"}
   ],
   "tiles": ["floor", "mato_enraizado", "path", "mato_alto"],
   "params": {

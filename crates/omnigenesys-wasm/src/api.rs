@@ -392,7 +392,8 @@ impl Generation {
         self.grid.names().map(str::to_string).collect()
     }
 
-    /// Each layer's kind, in the same order: "tiles" or "scalar".
+    /// Each layer's kind, in the same order: "tiles", "scalar", "index" or
+    /// "objects".
     pub fn kinds(&self) -> Vec<String> {
         self.grid
             .names()
@@ -415,6 +416,13 @@ impl Generation {
     pub fn scalar(&self, name: &str) -> Option<Vec<f32>> {
         let id = self.grid.layer_id(name).ok()?;
         Some(self.grid.scalars(id).ok()?.as_slice().to_vec())
+    }
+
+    /// One index layer's values, in the same order. `None` for a name the
+    /// map does not have, or another kind of layer.
+    pub fn index(&self, name: &str) -> Option<Vec<u32>> {
+        let id = self.grid.layer_id(name).ok()?;
+        Some(self.grid.indices(id).ok()?.as_slice().to_vec())
     }
 
     /// Every layer drawn over the one before it: for each cell, the tile of

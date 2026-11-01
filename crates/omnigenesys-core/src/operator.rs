@@ -314,6 +314,13 @@ impl<'a> BuildContext<'a> {
         Ok(WriteHandle { layer: id })
     }
 
+    /// Declares a write to the index layer `layer`, at the cell only.
+    pub fn write_index(&mut self, layer: &str) -> Result<WriteHandle, BuildError> {
+        let id = self.layer_of(layer, LayerKind::Index)?;
+        self.access.add_write(id, Reach::ZERO);
+        Ok(WriteHandle { layer: id })
+    }
+
     /// Declares a synchronous update of the scalar layer `layer`, as
     /// [`read_write`](Self::read_write) does for tiles: each cell's new value
     /// comes from the layer as the step found it, up to `reach` around.
@@ -538,6 +545,13 @@ impl GridView<'_> {
             return Err(OpError::Undeclared { layer: h.layer });
         }
         Ok(self.grid.scalars_mut(h.layer)?)
+    }
+
+    pub fn indices_mut(&mut self, h: WriteHandle) -> Result<&mut Layer<u32>, OpError> {
+        if !self.access.writes(h.layer) {
+            return Err(OpError::Undeclared { layer: h.layer });
+        }
+        Ok(self.grid.indices_mut(h.layer)?)
     }
 
     pub fn objects(&self, h: ReadHandle) -> Result<&ObjectLayer, OpError> {

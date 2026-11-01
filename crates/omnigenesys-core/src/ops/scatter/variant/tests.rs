@@ -26,7 +26,7 @@ fn step(id: &str, op: &str, config: Json, conditions: Json) -> StepSpec {
 fn grid(bounds: Bounds) -> Grid {
     let mut g = Grid::chunk(bounds, MAP);
     g.add_layer("vegetacao", LayerKind::Tiles).unwrap();
-    g.add_layer("variante", LayerKind::Scalar).unwrap();
+    g.add_layer("variante", LayerKind::Index).unwrap();
     g
 }
 
@@ -53,7 +53,7 @@ fn steps(weights: Json, bush_chance: f64) -> Vec<StepSpec> {
 }
 
 /// The variant layer after `steps` on `bounds`, and the bush cells.
-fn run(steps: &[StepSpec], bounds: Bounds) -> (Vec<f32>, Vec<bool>) {
+fn run(steps: &[StepSpec], bounds: Bounds) -> (Vec<u32>, Vec<bool>) {
     let mut g = grid(bounds);
     let t = tiles();
     Pipeline::build(&Registry::with_builtins(), &g, &t, steps)
@@ -61,7 +61,7 @@ fn run(steps: &[StepSpec], bounds: Bounds) -> (Vec<f32>, Vec<bool>) {
         .run(&mut g, "", 7)
         .unwrap();
     let v = g
-        .scalars(g.layer_id("variante").unwrap())
+        .indices(g.layer_id("variante").unwrap())
         .unwrap()
         .as_slice()
         .to_vec();
@@ -85,7 +85,7 @@ fn variants_come_by_their_weights_and_only_where_the_conditions_hold() {
             count[*x as usize] += 1;
         } else {
             // Not a bush: left as the layer was.
-            assert_eq!(*x, 0.0);
+            assert_eq!(*x, 0);
         }
     }
     let n: usize = count.iter().sum();

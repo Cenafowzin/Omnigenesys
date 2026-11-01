@@ -758,6 +758,7 @@ dependencies = [
  "itoa",
  "jsonc-parser",
  "jsonschema",
+ "libm",
  "rand_core",
  "schemars",
  "serde",

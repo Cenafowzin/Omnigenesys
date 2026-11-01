@@ -157,7 +157,8 @@ impl Generation {
         self.0.layers()
     }
 
-    /// Each layer's kind, in the order of `layers()`: "tiles" or "scalar".
+    /// Each layer's kind, in the order of `layers()`: "tiles", "scalar",
+    /// "index" or "objects".
     pub fn kinds(&self) -> Vec<String> {
         self.0.kinds()
     }
@@ -174,6 +175,14 @@ impl Generation {
         self.0
             .scalar(name)
             .ok_or_else(|| JsError::new(&format!("no scalar layer '{name}'")))
+    }
+
+    /// One index layer's values (a variant, a region), x fastest, then y,
+    /// then z.
+    pub fn index(&self, name: &str) -> Result<Vec<u32>, JsError> {
+        self.0
+            .index(name)
+            .ok_or_else(|| JsError::new(&format!("no index layer '{name}'")))
     }
 
     /// The object layers as JSON: lattice, boxes and props (see

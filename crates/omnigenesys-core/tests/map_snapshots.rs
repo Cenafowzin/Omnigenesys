@@ -288,8 +288,8 @@ fn island_output(seed: u64) -> String {
 fn island_output_v2() {
     // The version would change the snapshot on every release, not the map.
     let text = island_output(512).replace(
-        &format!("\"engine_version\": \"{ENGINE_VERSION}\""),
-        "\"engine_version\": \"<engine>\"",
+        &format!("\"version\": \"{ENGINE_VERSION}\"}}"),
+        "\"version\": \"<engine>\"}",
     );
     insta::assert_snapshot!(text);
 }

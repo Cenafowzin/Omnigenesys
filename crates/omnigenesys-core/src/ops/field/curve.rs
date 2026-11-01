@@ -1,3 +1,4 @@
+use crate::math::Power;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -105,9 +106,9 @@ pub struct Curve {
 enum Shape {
     Linear,
     Smooth(SmoothOrder),
-    Power(f64),
+    Power(Power),
     Sigmoid {
-        a: f64,
+        a: Power,
         k: f64,
     },
     Terrace {
@@ -138,7 +139,9 @@ impl Shape {
         Ok(match kind {
             CurveKind::Linear => Shape::Linear,
             CurveKind::Smooth { order } => Shape::Smooth(order),
-            CurveKind::Power { exponent } => Shape::Power(positive("exponent", exponent)?),
+            CurveKind::Power { exponent } => {
+                Shape::Power(Power::new(positive("exponent", exponent)?))
+            }
             CurveKind::Sigmoid { exponent, midpoint } => {
                 let a = positive("exponent", exponent)?;
                 if !(midpoint > 0.0 && midpoint < 1.0) {
@@ -148,8 +151,9 @@ impl Shape {
                     ));
                 }
                 Shape::Sigmoid {
-                    a,
-                    k: (midpoint / (1.0 - midpoint)).powf(a),
+                    a: Power::new(a),
+                    // Once per build: libm's exact pow.
+                    k: libm::pow(midpoint / (1.0 - midpoint), a),
                 }
             }
             CurveKind::Terrace { steps, smoothness } => {
@@ -210,11 +214,11 @@ impl Shape {
             Shape::Linear => x,
             Shape::Smooth(SmoothOrder::Cubic) => x * x * (3.0 - 2.0 * x),
             Shape::Smooth(SmoothOrder::Quintic) => x * x * x * (x * (6.0 * x - 15.0) + 10.0),
-            Shape::Power(e) => x.powf(*e),
+            Shape::Power(e) => e.of(x),
             Shape::Sigmoid { a, k } => {
-                let up = x.powf(*a);
+                let up = a.of(x);
                 // Both terms are 0 only if x is 0 and 1 at once.
-                up / (up + k * (1.0 - x).powf(*a))
+                up / (up + k * a.of(1.0 - x))
             }
             Shape::Terrace { steps, smoothness } => {
                 // FastNoise2's Terrace: round to a level, then pull back
@@ -280,7 +284,7 @@ fn monotone_slopes(xs: &[f64], ys: &[f64]) -> Vec<f64> {
             continue;
         }
         let (a, b) = (m[i] / d[i], m[i + 1] / d[i]);
-        let r = a.hypot(b);
+        let r = libm::hypot(a, b);
         if r > 3.0 {
             m[i] = 3.0 / r * a * d[i];
             m[i + 1] = 3.0 / r * b * d[i];

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnigenesys.dev/schema/omap-2.schema.json",
+  "title": "Omnigenesys map, output v2 (.omap)",
+  "description": "A generated map. Readers refuse a `version` they do not know, accept a higher `minor`, and ignore fields they do not know; a `kind` or `encoding` they do not know is data they cannot read and is refused. Axes: x right, y down (row 0 at the top), z up (levels of a 3D map). One cell is one unit. Cells go x fastest, then y, then z. Layers are in draw order, the first at the bottom.",
+  "type": "object",
+  "required": ["format", "version", "minor", "generator", "axes", "seed", "salted", "params", "origin", "size", "tiles", "layers", "objects", "markers"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": "omnigenesys-map" },
+    "version": { "const": 2 },
+    "minor": { "type": "integer", "minimum": 0 },
+    "generator": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "axes": {
+      "type": "object",
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "const": "right" },
+        "y": { "const": "down" },
+        "z": { "const": "up" }
+      }
+    },
+    "seed": { "type": "string", "pattern": "^[0-9]+$", "description": "A u64 as text: above 2^53 a JSON number would be rounded." },
+    "salted": { "type": "boolean" },
+    "attempt": { "type": "integer", "minimum": 1, "description": "Written only when the map took more than one attempt." },
+    "params": {
+      "type": "object",
+      "additionalProperties": { "type": ["number", "integer", "boolean", "string"] }
+    },
+    "origin": { "$ref": "#/$defs/triple" },
+    "size": { "$ref": "#/$defs/size" },
+    "tiles": {
+      "type": "array",
+      "minItems": 1,
+      "prefixItems": [{ "const": "empty" }],
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "tiles[i] names id i in this file only; tiles[0] is always \"empty\". Adapters map by name."
+    },
+    "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
+    "objects": { "type": "array", "items": { "$ref": "#/$defs/object" } },
+    "markers": { "type": "array" }
+  },
+  "$defs": {
+    "triple": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "size": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "whole": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+    "layer": {
+      "type": "object",
+      "required": ["name", "kind", "encoding"],
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "enum": ["tiles", "index", "scalar"] },
+        "encoding": { "enum": ["rle", "dense"] }
+      },
+      "oneOf": [
+        {
+          "properties": { "kind": { "enum": ["tiles", "index"] }, "encoding": { "const": "rle" }, "runs": { "$ref": "#/$defs/whole" } },
+          "required": ["runs"],
+          "description": "Flat runs: value, count, value, count, ..."
+        },
+        {
+          "properties": { "kind": { "enum": ["tiles", "index"] }, "encoding": { "const": "dense" }, "cells": { "$ref": "#/$defs/whole" } },
+          "required": ["cells"]
+        },
+        {
+          "properties": { "kind": { "const": "scalar" }, "encoding": { "const": "dense" }, "values": { "type": "array", "items": { "type": "number" } } },
+          "required": ["values"]
+        }
+      ]
+    },
+    "object": {
+      "type": "object",
+      "required": ["id", "type", "layer", "bbox", "props"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "type": { "type": "string" },
+        "layer": { "type": "string" },
+        "bbox": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 6,
+          "maxItems": 6,
+          "description": "[x, y, z, w, h, d]: the box's first cell and its size in cells. The pivot is the adapter's."
+        },
+        "props": { "type": "object", "additionalProperties": { "$ref": "#/$defs/prop" } }
+      }
+    },
+    "prop": {
+      "type": "object",
+      "required": ["type", "value"],
+      "oneOf": [
+        { "properties": { "type": { "const": "int" }, "value": { "type": "integer" } } },
+        { "properties": { "type": { "const": "float" }, "value": { "type": "number" } } },
+        { "properties": { "type": { "const": "bool" }, "value": { "type": "boolean" } } },
+        { "properties": { "type": { "const": "string" }, "value": { "type": "string" } } },
+        { "properties": { "type": { "const": "cell" }, "value": { "$ref": "#/$defs/triple" } } },
+        { "properties": { "type": { "const": "object" }, "value": { "type": "integer", "minimum": 1 } } },
+        { "properties": { "type": { "const": "list" }, "value": { "type": "array", "items": { "$ref": "#/$defs/prop" } } } }
+      ]
+    }
+  }
+}
