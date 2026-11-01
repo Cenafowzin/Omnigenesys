@@ -162,12 +162,7 @@ pub fn write_json<W: Write>(
         }
     }
     let layers = plan(grid, tiles, encoding)?;
-    let mut w = Writer {
-        out,
-        buf: Vec::with_capacity(BLOCK + 64),
-        scratch: Vec::new(),
-        num: itoa::Buffer::new(),
-    };
+    let mut w = Writer::new(out);
     let b = grid.bounds();
     w.raw("{\n  \"format\": \"omnigenesys-map\",\n  \"version\": ");
     w.int(OUTPUT_VERSION);
@@ -212,23 +207,21 @@ pub fn write_json<W: Write>(
         w.layer(layer)?;
     }
     w.raw(if layers.is_empty() { "]" } else { "\n  ]" });
-    w.raw(",\n  \"objects\": [");
-    let mut first = true;
-    for name in grid.names() {
-        let id = grid.layer_id(name)?;
-        if grid.kind(id)? != LayerKind::Objects {
-            continue;
-        }
-        for o in grid.objects(id)?.iter() {
-            w.raw(if first { "\n    " } else { ",\n    " });
-            first = false;
-            w.object(name, o)?;
-        }
-    }
-    w.raw(if first { "]" } else { "\n  ]" });
+    w.raw(",\n  \"objects\": ");
+    w.objects(grid, "\n    ", "\n  ")?;
     // Not produced by any operator yet; present so readers can rely on
     // the shape now.
     w.raw(",\n  \"markers\": []\n}\n");
+    w.finish()?;
+    Ok(())
+}
+
+/// Only the map's `objects` array, as [`write_json`] writes it: for an
+/// engine that takes the cells as arrays (the native library) and still
+/// reads objects with the same parser as a `.omap` file.
+pub fn write_objects<W: Write>(out: W, grid: &Grid) -> Result<(), ExportError> {
+    let mut w = Writer::new(out);
+    w.objects(grid, "", "")?;
     w.finish()?;
     Ok(())
 }
@@ -395,6 +388,41 @@ struct Writer<W> {
 }
 
 impl<W: Write> Writer<W> {
+    fn new(out: W) -> Writer<W> {
+        Writer {
+            out,
+            buf: Vec::with_capacity(BLOCK + 64),
+            scratch: Vec::new(),
+            num: itoa::Buffer::new(),
+        }
+    }
+
+    /// `[obj, obj]` of every object layer, in layer order; `indent`
+    /// before each object, `close` before the `]` (none when empty).
+    fn objects(&mut self, grid: &Grid, indent: &str, close: &str) -> Result<(), ExportError> {
+        self.raw("[");
+        let mut first = true;
+        for name in grid.names() {
+            let id = grid.layer_id(name)?;
+            if grid.kind(id)? != LayerKind::Objects {
+                continue;
+            }
+            for o in grid.objects(id)?.iter() {
+                if !first {
+                    self.raw(",");
+                }
+                self.raw(indent);
+                first = false;
+                self.object(name, o)?;
+            }
+        }
+        if !first {
+            self.raw(close);
+        }
+        self.raw("]");
+        Ok(())
+    }
+
     #[inline]
     fn raw(&mut self, s: &str) {
         self.buf.extend_from_slice(s.as_bytes());

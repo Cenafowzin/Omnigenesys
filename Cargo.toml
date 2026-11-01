@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/omnigenesys-core", "crates/omnigenesys-wasm", "bins/mapgen"]
+members = ["crates/omnigenesys-core", "crates/omnigenesys-wasm", "crates/omnigenesys-ffi", "bins/mapgen"]
 resolver = "3"
 
 [workspace.package]

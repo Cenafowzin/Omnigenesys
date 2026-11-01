@@ -1,0 +1,25 @@
+[package]
+name = "omnigenesys_ffi"
+description = "Omnigenesys as a native library: a C ABI for engines (Unity through P/Invoke, others through C)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+# omnigenesys.dll / libomnigenesys.so / libomnigenesys.dylib: the name the
+# C# bindings load.
+name = "omnigenesys"
+# cdylib: desktop and Android; staticlib: iOS (and consoles), linked into
+# the game; rlib: the Rust tests call the same functions.
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+omnigenesys_core = { path = "../omnigenesys-core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[build-dependencies]
+# The C# side of every `extern "C"` here, written into the Unity package
+# (pesquisa 2026-10-31-adaptador-unity: Cysharp's, made for Unity).
+csbindgen = "1.9"
