@@ -1,0 +1,15 @@
+{
+  "name": "com.omnigenesys.unity",
+  "version": "0.1.0",
+  "displayName": "Omnigenesys",
+  "description": "Procedural maps from Omnigenesys pipeline files, made while the game runs (native library) or loaded from .omap files, built into Tilemaps and prefabs.",
+  "unity": "6000.0",
+  "license": "MIT OR Apache-2.0",
+  "author": {
+    "name": "Rodrigo Dubeux"
+  },
+  "keywords": ["procedural", "generation", "tilemap", "map"],
+  "dependencies": {
+    "com.unity.modules.tilemap": "1.0.0"
+  }
+}

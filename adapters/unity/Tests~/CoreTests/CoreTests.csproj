@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The package's plain C# (Runtime/Core and the generated bindings) against
+    the real native library, outside Unity:
+
+      sh adapters/unity/Tools~/build-native.sh
+      dotnet run -c Release (with the project option) adapters/unity/Tests~/CoreTests
+
+    (XML comments cannot hold two hyphens in a row, hence the words.)
+
+    C# 9 is what Unity 6 compiles: a feature Unity lacks fails here first.
+    No NuGet package: nothing to download.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../Runtime/Core/*.cs" />
+    <Compile Include="../../Runtime/Native/*.cs" />
+    <None Include="../../Runtime/Plugins/x86_64/omnigenesys.dll" Condition="Exists('../../Runtime/Plugins/x86_64/omnigenesys.dll')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>omnigenesys.dll</Link>
+    </None>
+  </ItemGroup>
+</Project>
