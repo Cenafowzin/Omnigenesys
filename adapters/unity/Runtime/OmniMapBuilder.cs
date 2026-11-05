@@ -58,6 +58,7 @@ namespace Omnigenesys
             _map = map;
             var unmapped = new SortedSet<string>();
             var unbound = new SortedSet<string>();
+            var unusedVariants = new List<string>();
 
             foreach (var layer in map.Layers)
             {
@@ -66,20 +67,22 @@ namespace Omnigenesys
                 var tilemap = TilemapOf(layer.Name);
                 if (tilemap == null)
                     unbound.Add(layer.Name);
-                PaintAndPlace(map, layer, tilemap, unmapped);
+                PaintAndPlace(map, layer, tilemap, unmapped, unusedVariants);
             }
-            var spawned = SpawnObjects(map, unmapped);
+            var spawned = SpawnObjects(map, unmapped, unusedVariants);
             foreach (var o in spawned.Values)
                 foreach (var hook in o.GetComponents<IOmniSpawned>())
                     hook.OnOmniSpawned(o, map, spawned);
 
-            if (reportUnmapped && (unmapped.Count > 0 || unbound.Count > 0))
+            if (reportUnmapped && (unmapped.Count > 0 || unbound.Count > 0 || unusedVariants.Count > 0))
             {
                 var sb = new StringBuilder($"[Omnigenesys] {name}:");
                 if (unmapped.Count > 0)
                     sb.Append(" not in the mapping: ").Append(string.Join(", ", unmapped)).Append('.');
                 if (unbound.Count > 0)
                     sb.Append(" Tile layers with no Tilemap: ").Append(string.Join(", ", unbound)).Append('.');
+                foreach (var u in unusedVariants)
+                    sb.Append(' ').Append(u);
                 Debug.Log(sb.ToString(), this);
             }
         }
@@ -129,7 +132,7 @@ namespace Omnigenesys
             return grid.transform.TransformPoint(grid.CellToLocalInterpolated(cell));
         }
 
-        void PaintAndPlace(OmniMap map, OmniLayer layer, Tilemap tilemap, SortedSet<string> unmapped)
+        void PaintAndPlace(OmniMap map, OmniLayer layer, Tilemap tilemap, SortedSet<string> unmapped, List<string> unusedVariants)
         {
             int w = map.Width, h = map.Height, d = map.Depth;
             // Each tile id's rule, once.
@@ -153,6 +156,12 @@ namespace Omnigenesys
             var ids = layer.TileIds;
             TileBase[] block = tilemap != null ? new TileBase[ids.Length] : null;
             var seen = new bool[rules.Length];
+            // The highest variant each tile drew and in how many cells: a
+            // mapping with more variants than the map ever picks is reported
+            // (a pipeline with fewer weights than prefabs would otherwise
+            // leave some prefabs out without a word).
+            var highest = new long[rules.Length];
+            var cells = new int[rules.Length];
             for (int z = 0; z < d; z++)
                 for (int r = 0; r < h; r++)
                 {
@@ -174,6 +183,9 @@ namespace Omnigenesys
                             continue;
                         }
                         uint variant = variantsOf[t]?[i] ?? 0;
+                        if (variant > highest[t])
+                            highest[t] = variant;
+                        cells[t]++;
                         if (block != null && rule.tiles.Length > 0)
                             block[(z * h + j) * w + x] = Pick(rule.tiles, variant, map.Tiles[t]);
                         if (rule.prefabs.Length > 0)
@@ -184,6 +196,15 @@ namespace Omnigenesys
                         }
                     }
                 }
+            for (int t = 1; t < rules.Length; t++)
+            {
+                if (variantsOf[t] == null || cells[t] == 0)
+                    continue;
+                int has = Math.Max(rules[t].tiles.Length, rules[t].prefabs.Length);
+                if (highest[t] + 1 < has)
+                    unusedVariants.Add(
+                        $"Tile '{map.Tiles[t]}' has {has} variants in the mapping, but its {cells[t]} cells in '{layer.Name}' only used {highest[t] + 1}: if the pipeline has fewer variants, raise its count.");
+            }
             if (block == null)
                 return;
             int top = Row(map, map.OriginY);
@@ -202,9 +223,11 @@ namespace Omnigenesys
             return items[i];
         }
 
-        Dictionary<long, OmniObject> SpawnObjects(OmniMap map, SortedSet<string> unmapped)
+        Dictionary<long, OmniObject> SpawnObjects(OmniMap map, SortedSet<string> unmapped, List<string> unusedVariants)
         {
             var spawned = new Dictionary<long, OmniObject>();
+            // Per object type that picks by a prop: how many, the highest variant, the prefabs.
+            var drawn = new SortedDictionary<string, (int count, long highest, int has)>(StringComparer.Ordinal);
             foreach (var o in map.Objects)
             {
                 var rule = mapping.Object(o.Type);
@@ -220,6 +243,8 @@ namespace Omnigenesys
                         throw new InvalidOperationException(
                             $"object {o.Id} ('{o.Type}') has no whole prop '{rule.variantProp}' to pick its prefab");
                     variant = (uint)p.AsInt();
+                    drawn.TryGetValue(o.Type, out var d);
+                    drawn[o.Type] = (d.count + 1, Math.Max(d.highest, variant), rule.prefabs.Length);
                 }
                 var prefab = Pick(rule.prefabs, variant, o.Type);
                 if (prefab == null)
@@ -232,6 +257,10 @@ namespace Omnigenesys
                 omni.Data = o;
                 spawned[o.Id] = omni;
             }
+            foreach (var kv in drawn)
+                if (kv.Value.highest + 1 < kv.Value.has)
+                    unusedVariants.Add(
+                        $"Object '{kv.Key}' has {kv.Value.has} prefabs in the mapping, but its {kv.Value.count} objects only used {kv.Value.highest + 1}: if the pipeline has fewer variants, raise its count.");
             return spawned;
         }
 

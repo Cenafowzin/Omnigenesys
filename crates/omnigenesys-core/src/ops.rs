@@ -9,7 +9,7 @@
 //! - `shape`: `CellularAutomaton`, `RegionSize`.
 //! - `validate`: `Check`.
 //! - `objects`: `PlaceObjects`, `GrowObjects`, `MeasureObjects`,
-//!   `TagObjects`, `ConnectObjects`.
+//!   `TagObjects`, `PickObjectVariant`, `ConnectObjects`.
 //! - `paths`: `CarvePaths`.
 //!
 //! The folders are for reading the code; the public paths stay flat
@@ -22,6 +22,7 @@ mod scatter;
 mod shape;
 mod terrain;
 mod validate;
+mod weights;
 
 pub use field::{
     Combine, CombineConfig, CombineInput, CombineOp, Curve, CurveConfig, CurveKind, Interpolation,
@@ -31,8 +32,8 @@ pub use field::{
 pub use objects::{
     Anchor, AnchorAxis, ConnectObjects, ConnectObjectsConfig, Count, CountRange, CountWord, Expand,
     Frontier, GrowObjects, GrowObjectsConfig, Link, Measure, MeasureObjects, MeasureObjectsConfig,
-    OnExhausted, OrderKey, PlaceObjects, PlaceObjectsConfig, Retire, Side, Size, TagObjects,
-    TagObjectsConfig,
+    OnExhausted, OrderKey, PickObjectVariant, PickObjectVariantConfig, PlaceObjects,
+    PlaceObjectsConfig, Retire, Side, Size, TagObjects, TagObjectsConfig,
 };
 pub use paths::{
     AddField, AddRule, AddTerm, Blocked, CarvePaths, CarvePathsConfig, Cost, CostRule, PathShape,
@@ -64,6 +65,7 @@ pub(crate) fn register_builtins(r: &mut Registry) {
     add::<LinearGradient>(r);
     add::<MeasureObjects>(r);
     add::<Noise>(r);
+    add::<PickObjectVariant>(r);
     add::<PickVariant>(r);
     add::<PlaceObjects>(r);
 

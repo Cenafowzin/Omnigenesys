@@ -146,7 +146,7 @@
        {"type": "not_near_type", "layer": "terreno", "tile": "path", "distance": 1},
        {"type": "not", "condition": {"type": "in_object", "layer": "coisas"}}]},
     {"id": "variante_mato", "operator": "PickVariant", "description": "Qual dos prefabs de mato cada mato alto usa, fixo pela semente.",
-     "config": {"layer": "variante_mato", "weights": [1, 1, 1]},
+     "config": {"layer": "variante_mato", "weights": [1, 1, 1, 1, 1, 1, 1]},
      "conditions": [{"type": "tile_is", "layer": "vegetacao", "tile": "mato_alto"}]},
 
     {"id": "postes", "operator": "PlaceObjects", "description": "Postes de luz ao lado dos caminhos, quantos couberem a pelo menos `entre_postes` um do outro, sem mato e com 2 de folga das coisas.",
@@ -157,6 +157,8 @@
            {"type": "neighbours", "min": 1, "condition": {"type": "tile_is", "layer": "terreno", "tile": "path"}},
            {"type": "not", "condition": {"type": "tile_is", "layer": "vegetacao", "tile": "mato_alto"}}]}},
          {"type": "distance", "where": [{"type": "kind_is", "kind": "poste_luz"}], "min": {"$param": "entre_postes"}},
-         {"type": "overlaps", "margin": 2, "max": 0}]}}
+         {"type": "overlaps", "margin": 2, "max": 0}]}},
+    {"id": "variante_poste", "operator": "PickObjectVariant", "description": "Qual dos prefabs de poste cada poste usa, fixo pela semente.",
+     "config": {"layer": "coisas", "where": [{"type": "kind_is", "kind": "poste_luz"}], "prop": "variante", "weights": [1, 1, 1, 1]}}
   ]
 }

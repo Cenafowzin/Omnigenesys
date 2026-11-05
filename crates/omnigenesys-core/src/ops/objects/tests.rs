@@ -3,6 +3,7 @@
 use serde_json::{Value as Json, json};
 
 use crate::{
+    coords::Coord,
     grid::Grid,
     object::{Object, Value},
     operator::Registry,
@@ -1068,4 +1069,110 @@ fn a_star_needs_its_hubs_and_only_a_star_takes_them() {
                        "hub": [{"type": "kind_is", "kind": "x"}]}),
     );
     assert!(e.contains("only `star` takes a `hub`"), "{e}");
+}
+
+/// One-cell "poste" objects on "solta", after the rooms, kept off them.
+fn posts(count: u32) -> Json {
+    json!({"id": "postes", "operator": "PlaceObjects", "config": {
+        "layer": "solta", "kind": "poste", "count": count, "size": {"width": 1, "height": 1},
+        "where": [{"type": "overlaps", "margin": 1, "max": 0}]}})
+}
+
+fn variant_step(weights: Json) -> Json {
+    json!({"id": "v", "operator": "PickObjectVariant", "config": {
+        "layer": "solta", "where": [{"type": "kind_is", "kind": "poste"}],
+        "prop": "variante", "weights": weights}})
+}
+
+fn variant(o: &Object) -> Option<i64> {
+    match o.prop("variante") {
+        Some(Value::Int(v)) => Some(*v),
+        None => None,
+        other => panic!("variante is {other:?}"),
+    }
+}
+
+#[test]
+fn object_variant_goes_on_the_objects_where_passes_by_weight() {
+    let g = run(&pipeline(json!([
+        loose(json!(6)),
+        posts(200),
+        variant_step(json!([1, 0, 3]))
+    ])));
+    let all = objects(&g, "solta");
+    let mut seen = [0usize; 3];
+    for o in &all {
+        match (o.kind.as_str(), variant(o)) {
+            ("sala", None) => {}
+            ("poste", Some(v)) => seen[v as usize] += 1,
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(seen.iter().sum::<usize>(), 200);
+    assert_eq!(seen[1], 0, "weight 0 is never picked");
+    // 1 : 3 over 200 posts: 50 expected for variant 0 (sd ~6).
+    assert!((25..=75).contains(&seen[0]), "{seen:?}");
+}
+
+/// The draw is the object's corner's: other objects coming or going, or
+/// `where` taking more of them, leaves each post's variant alone.
+#[test]
+fn object_variant_is_fixed_by_the_object_not_by_its_neighbours() {
+    let of = |g: &Grid| -> Vec<(Coord, Option<i64>)> {
+        objects(g, "solta")
+            .iter()
+            .filter(|o| o.kind == "poste")
+            .map(|o| (o.bbox.origin, variant(o)))
+            .collect()
+    };
+    let posts_only = run(&pipeline(json!([
+        posts(40),
+        variant_step(json!([1, 1, 1, 1]))
+    ])));
+    let again = run(&pipeline(json!([
+        posts(40),
+        variant_step(json!([1, 1, 1, 1]))
+    ])));
+    assert_eq!(of(&posts_only), of(&again));
+
+    // The same posts, then rooms after them; and `where` taking every object.
+    let mut everything = variant_step(json!([1, 1, 1, 1]));
+    everything["config"]["where"] = json!([]);
+    let with_rooms = run(&pipeline(json!([posts(40), loose(json!(5)), everything])));
+    assert_eq!(of(&posts_only), of(&with_rooms));
+    let rooms = objects(&with_rooms, "solta");
+    assert!(rooms.iter().all(|o| variant(o).is_some()));
+
+    let other_seed = run_seed(
+        &pipeline(json!([posts(40), variant_step(json!([1, 1, 1, 1]))])),
+        7,
+    )
+    .unwrap();
+    let mut all = of(&other_seed)
+        .into_iter()
+        .map(|(_, v)| v.unwrap())
+        .collect::<Vec<_>>();
+    all.sort_unstable();
+    all.dedup();
+    assert_eq!(
+        all,
+        [0, 1, 2, 3],
+        "40 posts over 4 even variants show all of them"
+    );
+}
+
+#[test]
+fn object_variant_needs_a_prop_and_good_weights() {
+    let refused = |step: Json| build(&pipeline(json!([step]))).err().unwrap();
+    let mut no_prop = variant_step(json!([1]));
+    no_prop["config"]["prop"] = json!("");
+    assert!(format!("{:?}", refused(no_prop)).contains("which prop"));
+    for (w, says) in [
+        (json!([]), "0 weights"),
+        (json!([0, 0]), "every weight is 0"),
+        (json!([1, 2_000_000]), "above 1000000"),
+    ] {
+        let e = format!("{:?}", refused(variant_step(w)));
+        assert!(e.contains(says), "{e}");
+    }
 }

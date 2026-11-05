@@ -129,6 +129,7 @@ fn the_dispatch_names_every_operator() {
             "LinearGradient",
             "MeasureObjects",
             "Noise",
+            "PickObjectVariant",
             "PickVariant",
             "PlaceObjects",
             "RadialGradient",
@@ -137,7 +138,7 @@ fn the_dispatch_names_every_operator() {
             "TagObjects"
         ])
     );
-    assert_eq!(step["allOf"].as_array().unwrap().len(), 17);
+    assert_eq!(step["allOf"].as_array().unwrap().len(), 18);
 }
 
 const CAVE: &str = include_str!("../../../tests/pipelines/cave.json");

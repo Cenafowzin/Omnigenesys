@@ -9,6 +9,7 @@ mod common;
 mod connect_objects;
 mod grow_objects;
 mod measure_objects;
+mod pick_variant;
 mod place_objects;
 mod tag_objects;
 
@@ -18,6 +19,7 @@ pub use grow_objects::{
     Expand, GrowObjects, GrowObjectsConfig, OnExhausted, Pick as Frontier, Retire,
 };
 pub use measure_objects::{Measure, MeasureObjects, MeasureObjectsConfig};
+pub use pick_variant::{PickObjectVariant, PickObjectVariantConfig};
 pub use place_objects::{Anchor, AnchorAxis, PlaceObjects, PlaceObjectsConfig, Side, Size};
 pub use tag_objects::{TagObjects, TagObjectsConfig};
 

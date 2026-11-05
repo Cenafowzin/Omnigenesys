@@ -88,7 +88,7 @@ fn cave_recipe() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn lost_fields() {
-    assert_eq!(fingerprint(LOST_FIELDS), 1_805_886_996_095_494_214);
+    assert_eq!(fingerprint(LOST_FIELDS), 13_101_020_537_107_846_001);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
