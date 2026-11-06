@@ -1,0 +1,14 @@
+; The addon's test project: open this folder in Godot 4.3+ (or run
+; tests/run_tests.gd headless, see README.md). Games copy addons/omnigenesys
+; into their own project instead.
+
+config_version=5
+
+[application]
+
+config/name="Omnigenesys addon tests"
+config/features=PackedStringArray("4.3")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/omnigenesys/plugin.cfg")
