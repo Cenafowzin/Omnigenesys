@@ -12,6 +12,7 @@ extends SceneTree
 ## --seed 512 -o adapters/godot/tests/lost_fields_512.omap
 
 const FIXTURE := "res://tests/lost_fields_512.omap"
+const PIPELINE := "res://tests/lost_fields.json"
 
 var _failed := 0
 var _passed := 0
@@ -27,6 +28,11 @@ func _initialize() -> void:
 	_imports_as_a_map_file()
 	await _builds_tiles_scenes_and_objects(text)
 	await _refuses_a_missing_variant(text)
+	await _a_new_build_replaces_the_last_at_once(text)
+	_says_unused_variants_only_with_enough_draws()
+	await _generates_the_same_map_as_the_cli(text)
+	await _generator_reports_what_goes_wrong()
+	await _generator_builds_in_a_scene(text)
 	print("%d passed, %d failed" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -315,4 +321,142 @@ func _refuses_a_missing_variant(text: String) -> void:
 	print("(an error about variant 3 or above is expected next)")
 	_check(not b.build(m), "3 grass scenes for 7 variants is refused")
 	b.queue_free()
+	await process_frame
+
+
+func _generator(pipeline: JSON) -> OmniGenerator:
+	var g := OmniGenerator.new()
+	g.pipeline = pipeline
+	g.generate_on_start = false
+	root.add_child(g)
+	return g
+
+
+func _same_map(a: OmniMap, b: OmniMap, what: String) -> void:
+	_check(a.width == b.width and a.height == b.height and a.depth == b.depth, what + ": size")
+	_check(a.origin == b.origin and a.seed_text == b.seed_text, what + ": origin, seed")
+	_check(a.tiles == b.tiles, what + ": tile names")
+	_check(a.layers.size() == b.layers.size(), what + ": layer count")
+	for l in a.layers:
+		var other := b.layer(l.name)
+		_check(other != null and other.kind == l.kind, "%s: layer %s" % [what, l.name])
+		_check(other.ids == l.ids and other.values == l.values, "%s: the cells of %s" % [what, l.name])
+	_check(a.objects.size() == b.objects.size(), what + ": object count")
+	for i in a.objects.size():
+		var x := a.objects[i]
+		var y := b.objects[i]
+		_check(x.id == y.id and x.type == y.type and x.layer == y.layer and x.position == y.position and x.size == y.size,
+				"%s: object %d" % [what, x.id])
+		_check(x.props == y.props and x.prop_types == y.prop_types, "%s: the props of object %d" % [what, x.id])
+
+
+## The line after a build sees the new map's nodes and none of the last map's.
+func _a_new_build_replaces_the_last_at_once(text: String) -> void:
+	var b := _builder(7)
+	b.report_unmapped = false
+	var map := OmniMap.from_omap(text)
+	b.build(map)
+	var first := b.get_child_count()
+	var one: Node = b.get_child(first - 1)
+	b.build(map)
+	_check(b.get_child_count() == first, "a second build leaves no old node among the children")
+	_check(is_instance_valid(one) and not one.is_inside_tree(), "the last map's node left the tree at once")
+	await process_frame
+	_check(not is_instance_valid(one), "and it is freed by the end of the frame")
+	b.free()
+
+
+func _says_unused_variants_only_with_enough_draws() -> void:
+	_check(not OmniMapBuilder._variants_look_unused(3, 4, 7), "7 objects not reaching the 4th variant: chance, no note")
+	_check(OmniMapBuilder._variants_look_unused(3, 4, 40), "40 objects not reaching it: the note")
+	_check(not OmniMapBuilder._variants_look_unused(4, 4, 40), "every variant used: no note")
+
+
+## The CLI wrote the fixture; the library in the game must make the same map.
+func _generates_the_same_map_as_the_cli(text: String) -> void:
+	_check(OmniGenerator.can_generate(), "the native library loaded")
+	if not OmniGenerator.can_generate():
+		return
+	var g := _generator(load(PIPELINE))
+	var map: OmniMap = await g.generate(512)
+	_check(map != null, "generates seed 512")
+	if map != null:
+		_same_map(map, OmniMap.from_omap(text), "seed 512 against the CLI")
+	_check(g.last_seed == "512", "remembers the seed")
+	var big: OmniMap = await g.generate("18446744073709551615")
+	_check(big != null and big.seed_text == "18446744073709551615", "the highest seed")
+
+	var seeds := {}
+	g.seed_mode = OmniGenerator.SeedMode.RANDOM
+	for i in 3:
+		var random: OmniMap = await g.generate()
+		_check(random != null and random.seed_text.is_valid_int(), "a random seed")
+		if random != null:
+			seeds[random.seed_text] = random.layer("terreno").ids
+	_check(seeds.size() == 3, "random seeds differ")
+	_check(seeds.values()[0] != seeds.values()[1], "and so do their maps")
+
+	g.seed_mode = OmniGenerator.SeedMode.FIXED
+	g.fixed_seed = "512"
+	var fixed: OmniMap = await g.generate()
+	_check(fixed != null and fixed.seed_text == "512", "a fixed seed")
+
+	g.parameters = {"mato_limiar": 0.95}
+	var sparse: OmniMap = await g.generate()
+	_check(sparse != null and fixed != null and sparse.layer("vegetacao").ids != fixed.layer("vegetacao").ids,
+			"a param changes the map")
+	g.parameters = {}
+
+	var path := "user://omni_test_saved.omap"
+	await g.generate(512)
+	_check(g.save_last_seed(path), "saves the last seed")
+	_same_map(OmniMap.from_omap(FileAccess.get_file_as_string(path)), OmniMap.from_omap(text), "the saved .omap")
+	DirAccess.remove_absolute(path)
+	g.queue_free()
+
+
+func _generator_reports_what_goes_wrong() -> void:
+	if not OmniGenerator.can_generate():
+		return
+	print("(three errors from the generator are expected next)")
+	var g := _generator(load(PIPELINE))
+	var bad_seed: OmniMap = await g.generate("abc")
+	_check(bad_seed == null and OmniMap.last_error.contains("seed 'abc'"), "a bad seed: " + OmniMap.last_error)
+	g.parameters = {"nao_existe": 1}
+	var bad_param: OmniMap = await g.generate(1)
+	_check(bad_param == null and OmniMap.last_error.contains("nao_existe"), "an unknown param: " + OmniMap.last_error)
+	g.parameters = {}
+	g.pipeline = null
+	var none: OmniMap = await g.generate(1)
+	_check(none == null and not g.busy, "no pipeline, and the node is free again")
+	g.queue_free()
+
+
+func _generator_builds_in_a_scene(text: String) -> void:
+	if not OmniGenerator.can_generate():
+		return
+	var b := _builder(7)
+	var g := OmniGenerator.new()
+	g.pipeline = load(PIPELINE)
+	g.builder = b
+	g.seed_mode = OmniGenerator.SeedMode.FIXED
+	g.fixed_seed = "512"
+	var got := [null]
+	g.built.connect(func(map: OmniMap) -> void: got[0] = map)
+	root.add_child(g)
+	# Generate On Start: the node alone makes and builds the map.
+	while got[0] == null:
+		await process_frame
+	var map: OmniMap = got[0]
+	_check(b.map == map, "generate on start reaches the builder")
+	var fixture := OmniMap.from_omap(text)
+	var terreno: TileMapLayer = b.get_node("terreno")
+	var cells := 0
+	for id in fixture.layer("terreno").ids:
+		if id != 0:
+			cells += 1
+	_check(terreno.get_used_cells().size() == cells, "the terrain of seed 512 is painted")
+	b.clear()
+	b.queue_free()
+	g.queue_free()
 	await process_frame

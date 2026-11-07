@@ -1,0 +1,7 @@
+# godot-rust 0.5, the line that knows Godot 4.7, needs Rust 1.94. Only this
+# crate; the rest of the repository stays on its own toolchain. The maps do not
+# depend on it: tests/run_tests.gd compares them with the CLI's.
+[toolchain]
+channel = "1.94"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

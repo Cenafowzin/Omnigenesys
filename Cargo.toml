@@ -1,6 +1,9 @@
 [workspace]
 members = ["crates/omnigenesys-core", "crates/omnigenesys-wasm", "crates/omnigenesys-ffi", "bins/mapgen"]
 resolver = "3"
+# Built on its own (adapters/godot/build-native.sh): godot-rust is heavy, and
+# every `cargo test --workspace` would compile it.
+exclude = ["crates/omnigenesys-godot"]
 
 [workspace.package]
 version = "0.1.0"

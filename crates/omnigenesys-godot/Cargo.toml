@@ -1,0 +1,31 @@
+[package]
+name = "omnigenesys_godot"
+description = "Omnigenesys inside Godot: makes maps while the game runs (a GDExtension for the addon in adapters/godot)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Rodrigo Dubeux <digodubeux@gmail.com>"]
+repository = "https://github.com/Cenafowzin/Omnigenesys"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+omnigenesys_core = { path = "../omnigenesys-core" }
+serde_json = { version = "1", features = ["preserve_order"] }
+# api-4-3: a library built against an API runs on that Godot and every newer
+# one. 0.5 is the line that knows Godot 4.7.
+godot = { version = "0.5", default-features = false, features = ["api-4-3"] }
+
+# Its own workspace, so the engine's `cargo test --workspace` never builds it.
+[workspace]
+
+[profile.release]
+# The core as the workspace builds it (CLAUDE.md: inlining across codegen
+# units). The bindings are huge and off the hot path: split, they compile in
+# far less memory.
+codegen-units = 16
+strip = true
+
+[profile.release.package.omnigenesys_core]
+codegen-units = 1

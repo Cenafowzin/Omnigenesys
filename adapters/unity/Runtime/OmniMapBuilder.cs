@@ -93,12 +93,20 @@ namespace Omnigenesys
             foreach (var b in layers)
                 if (b.tilemap != null)
                     b.tilemap.ClearAllTiles();
-            foreach (var go in _made)
+            // Backwards: taking a parent's last child moves no others.
+            for (int i = _made.Count - 1; i >= 0; i--)
             {
+                var go = _made[i];
                 if (go == null)
                     continue;
                 if (Application.isPlaying)
+                {
+                    // Destroy waits for the frame's end. Off and out of its parent
+                    // now, so the code after a build finds only the new map's objects.
+                    go.SetActive(false);
+                    go.transform.SetParent(null, false);
                     Destroy(go);
+                }
                 else
                     DestroyImmediate(go);
             }
@@ -201,7 +209,7 @@ namespace Omnigenesys
                 if (variantsOf[t] == null || cells[t] == 0)
                     continue;
                 int has = Math.Max(rules[t].tiles.Length, rules[t].prefabs.Length);
-                if (highest[t] + 1 < has)
+                if (VariantsLookUnused(highest[t] + 1, has, cells[t]))
                     unusedVariants.Add(
                         $"Tile '{map.Tiles[t]}' has {has} variants in the mapping, but its {cells[t]} cells in '{layer.Name}' only used {highest[t] + 1}: if the pipeline has fewer variants, raise its count.");
             }
@@ -258,11 +266,16 @@ namespace Omnigenesys
                 spawned[o.Id] = omni;
             }
             foreach (var kv in drawn)
-                if (kv.Value.highest + 1 < kv.Value.has)
+                if (VariantsLookUnused(kv.Value.highest + 1, kv.Value.has, kv.Value.count))
                     unusedVariants.Add(
                         $"Object '{kv.Key}' has {kv.Value.has} prefabs in the mapping, but its {kv.Value.count} objects only used {kv.Value.highest + 1}: if the pipeline has fewer variants, raise its count.");
             return spawned;
         }
+
+        // Whether a mapping seems to have more variants than the pipeline draws. With
+        // few draws the last variant just may not come up (7 objects and 4 variants: 1
+        // map in 8): saying so on those would be a false alarm on any random seed.
+        static bool VariantsLookUnused(long used, int has, long draws) => used < has && draws >= has * 10;
 
         Vector3 PivotOf(OmniObjectData o, OmniPivot pivot)
         {

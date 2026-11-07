@@ -106,8 +106,15 @@ func clear() -> void:
 		if is_instance_valid(t):
 			t.clear()
 	_painted.clear()
-	for n in _made:
+	# Out of the tree right away, so the code after a build finds only the new
+	# map's nodes (queue_free alone leaves them until the frame ends). Backwards:
+	# taking a parent's last child moves no others.
+	for i in range(_made.size() - 1, -1, -1):
+		var n: Node = _made[i]
 		if is_instance_valid(n):
+			var parent := n.get_parent()
+			if parent != null:
+				parent.remove_child(n)
 			n.queue_free()
 	_made.clear()
 	map = null
@@ -209,7 +216,7 @@ func _paint(m: OmniMap, layer: OmniMap.Layer, target: TileMapLayer, rules: Dicti
 		if variants_of[t] == null or cells[t] == 0:
 			continue
 		var has := maxi(rule.atlas_coords.size(), rule.scenes.size())
-		if highest[t] + 1 < has:
+		if _variants_look_unused(highest[t] + 1, has, cells[t]):
 			notes.append("Tile '%s' has %d variants in the mapping, but its %d cells in '%s' only used %d: if the pipeline has fewer variants, raise its count."
 					% [m.tiles[t], has, cells[t], layer.name, highest[t] + 1])
 	return true
@@ -244,10 +251,17 @@ func _spawn_objects(m: OmniMap, rules: Dictionary, unmapped: Dictionary, notes: 
 		spawned[o.id] = node
 	for type: String in _sorted(drawn):
 		var d: Array = drawn[type]
-		if d[1] + 1 < d[2]:
+		if _variants_look_unused(d[1] + 1, d[2], d[0]):
 			notes.append("Object '%s' has %d scenes in the mapping, but its %d objects only used %d: if the pipeline has fewer variants, raise its count."
 					% [type, d[2], d[0], d[1] + 1])
 	return spawned
+
+
+## Whether a mapping seems to have more variants than the pipeline draws. With
+## few draws the last variant just may not come up (7 objects and 4 variants: 1
+## map in 8): saying so on those would be a false alarm on any random seed.
+static func _variants_look_unused(used: int, has: int, draws: int) -> bool:
+	return used < has and draws >= has * 10
 
 
 func _pivot(o: OmniMap.MapObject, pivot: OmniObjectRule.Pivot) -> Vector2:

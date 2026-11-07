@@ -145,6 +145,43 @@ static func from_omap(text: String) -> OmniMap:
 	return map
 
 
+## A map from the native library (OmniGeneration.result): the same map a
+## .omap file holds, in packed arrays, no number through JSON. Null if it
+## carries an error ([member last_error] says it).
+static func from_native(data: Dictionary) -> OmniMap:
+	last_error = ""
+	if data.has("error"):
+		return _fail(data["error"])
+	var map := OmniMap.new()
+	map.width = data["width"]
+	map.height = data["height"]
+	map.depth = data["depth"]
+	map.origin = data["origin"]
+	map.seed_text = data["seed"]
+	map.attempt = data["attempt"]
+	map.tiles = data["tiles"]
+	for item: Dictionary in data["layers"]:
+		var l := Layer.new()
+		l.name = item["name"]
+		l.kind = item["kind"]
+		if l.kind == "scalar":
+			l.values = item["values"]
+		else:
+			l.ids = item["ids"]
+		map.layers.append(l)
+		map._layers_by_name[l.name] = l
+	var json := JSON.new()
+	if json.parse(data["objects_json"]) != OK:
+		return _fail("objects: JSON line %d: %s" % [json.get_error_line(), json.get_error_message()])
+	for item: Variant in json.data:
+		var o: MapObject = _object(item)
+		if o == null:
+			return null
+		map.objects.append(o)
+		map._objects_by_id[o.id] = o
+	return map
+
+
 static func _layer(l: Dictionary, cells: int, tile_count: int) -> Layer:
 	var layer_name: Variant = l.get("name")
 	var kind: Variant = l.get("kind")
